@@ -18,3 +18,20 @@ def main():
 
 if __name__ == "__main__":
     main()
+elif page == "View Transactions":
+    st.header("All Transactions")
+    df = pd.read_sql("SELECT * FROM transactions", conn)
+
+    # Agent filter
+    agents = df["agent"].unique().tolist()
+    agents.sort()
+    selected_agent = st.selectbox("Select Agent", ["All"] + agents)
+
+    if selected_agent != "All":
+        df = df[df["agent"] == selected_agent]
+
+    st.dataframe(df)
+
+    # Optional: show totals for the filtered data
+    total_amount = df["amount"].sum()
+    st.write(f"**Total Amount: {total_amount}**")
