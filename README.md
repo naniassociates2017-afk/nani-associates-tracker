@@ -1,30 +1,14 @@
-# NANI ASSOCIATES – Business Tracker (Streamlit)
+# NANI ASSOCIATES Business Tracker
 
-A simple desktop/web app to record daily transactions and get monthly & service-wise profit/loss.
+This is a simple Streamlit app for tracking daily transactions (PAN, Passport, Aadhar, Digital Signature, and Online Services).
 
-## Features
-- Add, edit, delete transactions
-- Auto-calculated profit per entry
-- Filters by date and service
-- Monthly P&L and service-wise report tables
-- Export to Excel (3 sheets)
-- Save business info (name, address, proprietor, phone)
-- Data stored locally in SQLite (`nani_associates.db`)
+### Features:
+- Add daily income & expense transactions
+- Automatic profit/loss calculation
+- Export to Excel/CSV
+- Simple login system (admin + staff users)
 
-## How to run
-1. Install Python 3.9+
-2. Open terminal in this folder and run:
-   ```bash
-   pip install -r requirements.txt
-   streamlit run app.py
-   ```
-3. Your browser will open at `http://localhost:8501`
-
-## Default Services
-- PAN Card
-- Passport
-- Aadhaar Card
-- Digital Signature
-- Other Online Service
-
-You can modify the list in `app.py` (variable `SERVICES`).
+### Login Credentials (default):
+- **Username:** admin | **Password:** admin123
+- **Username:** staff1 | **Password:** staffpass
+- **Username:** staff2 | **Password:** staffpass2
