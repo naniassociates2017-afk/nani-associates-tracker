@@ -2,37 +2,7 @@ import streamlit as st
 import sqlite3
 import pandas as pd
 from datetime import datetime
-
-# -------------------- DATABASE SETUP --------------------
-def init_db():
-    conn = sqlite3.connect("tracker.db")
-    c = conn.cursor()
-
-    # Users table
-    c.execute("""CREATE TABLE IF NOT EXISTS users (
-                username TEXT PRIMARY KEY,
-                password TEXT)""")
-
-    # Service entries
-    c.execute("""CREATE TABLE IF NOT EXISTS service_entry (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                date TEXT,
-                customer TEXT,
-                service TEXT,
-                amount REAL,
-                status TEXT,
-                remarks TEXT)""")
-
-    # Expense entries
-    c.execute("""CREATE TABLE IF NOT EXISTS expense_entry (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                date TEXT,
-                expense_type TEXT,
-                amount REAL,
-                remarks TEXT)""")
-
-    conn.commit()
-    conn.close()
+from utils.db_utils import init_db, add_user, validate_user
 
 
 # -------------------- LOGIN --------------------
@@ -46,13 +16,7 @@ def login():
         password = st.sidebar.text_input("Password", type="password", key="login_password")
 
         if st.sidebar.button("Login", key="login_button"):
-            conn = sqlite3.connect("tracker.db")
-            c = conn.cursor()
-            c.execute("SELECT * FROM users WHERE username=? AND password=?", (username, password))
-            result = c.fetchone()
-            conn.close()
-
-            if result:
+            if validate_user(username, password):
                 st.session_state["logged_in"] = True
                 st.session_state["username"] = username
                 st.sidebar.success(f"Welcome, {username}")
@@ -127,29 +91,4 @@ def reports():
         balance = income - expenses
 
         st.metric("💵 Total Income (Paid)", f"{income:.2f}")
-        st.metric("⏳ Pending Amount", f"{pending:.2f}")
-        st.metric("📉 Total Expenses", f"{expenses:.2f}")
-        st.metric("📌 Closing Balance", f"{balance:.2f}")
-
-    conn.close()
-
-
-# -------------------- MAIN --------------------
-def main():
-    st.sidebar.title("📂 Menu")
-    login()
-
-    if st.session_state.get("logged_in", False):
-        choice = st.sidebar.radio("Navigation", ["Service Entry", "Expense Entry", "Reports"])
-
-        if choice == "Service Entry":
-            service_entry()
-        elif choice == "Expense Entry":
-            expense_entry()
-        elif choice == "Reports":
-            reports()
-
-
-if __name__ == "__main__":
-    init_db()
-    main()
+        st.metric("⏳ Pending Am
