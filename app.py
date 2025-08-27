@@ -35,6 +35,7 @@ elif page == "View Transactions":
     # Optional: show totals for the filtered data
     total_amount = df["amount"].sum()
     st.write(f"**Total Amount: {total_amount}**")
+    
     if st.session_state.get("logged_in"):
     page = st.sidebar.selectbox("Navigation", ["Add Transaction", "View Transactions", "Manage Agents", "Backup"])
 
