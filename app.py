@@ -317,4 +317,23 @@ def reports_page():
     st.metric("Total Received (₹)", f"{total_received:,.2f}")
     st.metric("Total Pending (₹)", f"{total_pending:,.2f}")
     st.metric("Closing Balance (₹)", f"{closing_balance:,.2f}")
+    import streamlit as st
+import pandas as pd
+
+# Import your functions
+# (we’ll create these below)
+from service_entry import service_entry_page
+from expense_entry import expense_entry_page
+from reports import reports_page
+
+st.sidebar.title("📂 Menu")
+menu = st.sidebar.radio("Select Page", ["Service Entry", "Expense Entry", "Reports"])
+
+if menu == "Service Entry":
+    service_entry_page()
+elif menu == "Expense Entry":
+    expense_entry_page()
+elif menu == "Reports":
+    reports_page()
+
 
