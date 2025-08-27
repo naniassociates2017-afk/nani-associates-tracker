@@ -35,6 +35,18 @@ elif page == "View Transactions":
     # Optional: show totals for the filtered data
     total_amount = df["amount"].sum()
     st.write(f"**Total Amount: {total_amount}**")
-    
+
+# Suppliers Table
+c.execute("""
+CREATE TABLE IF NOT EXISTS suppliers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    contact TEXT,
+    address TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+""")
+conn.commit()
+
 
 
