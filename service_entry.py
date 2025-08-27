@@ -37,3 +37,9 @@ def service_entry_page():
     st.subheader("📊 All Service Entries")
     df = load_data()
     st.dataframe(df)
+
+def load_data():
+    if os.path.exists(DATA_FILE):
+        return pd.read_csv(DATA_FILE)
+    else:
+        return pd.DataFrame(columns=["Date", "Customer", "Service", "Expense", "Income", "Profit", "Remarks"])
