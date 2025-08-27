@@ -47,6 +47,72 @@ CREATE TABLE IF NOT EXISTS suppliers (
 )
 """)
 conn.commit()
+import streamlit as st
+import pandas as pd
+import sqlite3
+
+# --- Database connection ---
+conn = sqlite3.connect("services.db", check_same_thread=False)
+c = conn.cursor()
+
+# --- Create Tables ---
+c.execute("""
+CREATE TABLE IF NOT EXISTS transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    agent TEXT NOT NULL,
+    application_no TEXT,
+    product TEXT,
+    supplier TEXT,
+    amount REAL NOT NULL,
+    type TEXT,
+    date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+""")
+
+c.execute("""
+CREATE TABLE IF NOT EXISTS suppliers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    contact TEXT,
+    address TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+""")
+
+conn.commit()
+
+# --- Login System ---
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+if not st.session_state.logged_in:
+    st.sidebar.title("Login")
+    username = st.sidebar.text_input("Username")
+    password = st.sidebar.text_input("Password", type="password")
+    login_btn = st.sidebar.button("Login")
+
+    if login_btn:
+        if username == "admin" and password == "admin123":  # change as needed
+            st.session_state.logged_in = True
+            st.success("Logged in successfully!")
+        else:
+            st.error("Invalid username or password")
+
+# --- Main App ---
+if st.session_state.logged_in:
+    if st.sidebar.button("Logout"):
+        st.session_state.logged_in = False
+        st.experimental_rerun()
+
+    page = st.sidebar.selectbox(
+        "Navigation",
+        ["Add Transaction", "View Transactions", "Manage Suppliers"]
+    )
+
+    # ---------------- Add Transaction Page ----------------
+    if page == "Add Transaction":
+        st.header("Add Transaction")
+
 
 
 
