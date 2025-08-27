@@ -131,4 +131,9 @@ elif page == "View Transactions":
                     file_name=f"{period.lower()}_report.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
+                page = st.sidebar.selectbox(
+    "Navigation",
+    ["Add Transaction", "View Transactions", "Manage Suppliers"]
+)
+
 
