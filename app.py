@@ -93,3 +93,42 @@ elif page == "View Transactions":
                 st.bar_chart(report.set_index(report.columns[0]))
         else:
             st.info("No data available after filters.")
+                        # --- Show Report Table ---
+            st.subheader(f"{period} Summary")
+            st.dataframe(report)
+
+            st.write(f"**Total Amount: {df['amount'].sum()}**")
+
+            # --- Show Chart (only if report not empty) ---
+            if not report.empty:
+                st.subheader(f"{period} Chart")
+                st.bar_chart(report.set_index(report.columns[0]))
+
+                # --- Download Buttons ---
+                st.subheader("Download Report")
+
+                # Convert to CSV
+                csv = report.to_csv(index=False).encode("utf-8")
+                st.download_button(
+                    label="📥 Download CSV",
+                    data=csv,
+                    file_name=f"{period.lower()}_report.csv",
+                    mime="text/csv",
+                )
+
+                # Convert to Excel
+                import io
+                from openpyxl import Workbook
+
+                output = io.BytesIO()
+                with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                    report.to_excel(writer, index=False, sheet_name="Report")
+                excel_data = output.getvalue()
+
+                st.download_button(
+                    label="📥 Download Excel",
+                    data=excel_data,
+                    file_name=f"{period.lower()}_report.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+
