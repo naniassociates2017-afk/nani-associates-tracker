@@ -1,0 +1,7 @@
+product = st.text_input("Product/Item")
+if st.button("Save"):
+    c.execute("""
+    INSERT INTO transactions (agent, application_no, amount, type, product)
+    VALUES (?, ?, ?, ?, ?)
+    """, (agent, application_no, amount, txn_type, product))
+    conn.commit()
