@@ -1,69 +1,60 @@
 import streamlit as st
-import pandas as pd
-import datetime
 
-# --- Simple Login Setup ---
+# -------------------------
+# USER CREDENTIALS
+# -------------------------
 USER_CREDENTIALS = {
-    "admin": "admin123",    # Owner
-    "staff1": "staffpass",  # Staff member 1
-    "staff2": "staffpass2"  # Staff member 2
+    "nani": "Sony@1430",
+    "admin": "admin123"
 }
 
-# --- Login Form ---
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = False
-
-if not st.session_state.logged_in:
+# -------------------------
+# LOGIN SYSTEM
+# -------------------------
+def login_screen():
     st.title("🔐 Login Required")
+
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
+
     if st.button("Login"):
         if username in USER_CREDENTIALS and USER_CREDENTIALS[username] == password:
             st.session_state.logged_in = True
+            st.session_state.username = username
             st.success("✅ Login successful!")
-            st.experimental_rerun()
+            st.rerun()  # ✅ fixed (old: st.experimental_rerun)
         else:
             st.error("❌ Invalid username or password")
-    st.stop()
+            st.stop()
 
-# --- Business Tracker App ---
-st.title("📊 NANI ASSOCIATES Business Tracker")
+# -------------------------
+# MAIN APP
+# -------------------------
+def main_app():
+    st.sidebar.success(f"👋 Welcome, {st.session_state.username}")
+    st.sidebar.button("Logout", on_click=logout)
 
-# Initialize session state for data
-if "transactions" not in st.session_state:
-    st.session_state.transactions = []
+    st.title("📊 Nani Associates Tracker")
 
-# Transaction Form
-with st.form("transaction_form"):
-    service = st.selectbox("Service", ["PAN Card", "Passport", "Aadhar Card", "Digital Signature", "Other Online Service"])
-    income = st.number_input("Income (₹)", min_value=0.0, step=10.0)
-    expense = st.number_input("Expense (₹)", min_value=0.0, step=10.0)
-    submitted = st.form_submit_button("Add Transaction")
-    if submitted:
-        st.session_state.transactions.append({
-            "date": datetime.date.today().strftime("%Y-%m-%d"),
-            "service": service,
-            "income": income,
-            "expense": expense,
-            "profit_loss": income - expense
-        })
-        st.success("Transaction added successfully!")
+    st.write("This is your main application after successful login.")
+    # 👉 Add your actual app features below
+    st.write("✅ App is working fine with the new login system!")
 
-# Display Data
-if st.session_state.transactions:
-    df = pd.DataFrame(st.session_state.transactions)
-    st.subheader("📅 Daily Transactions")
-    st.dataframe(df)
+# -------------------------
+# LOGOUT FUNCTION
+# -------------------------
+def logout():
+    st.session_state.logged_in = False
+    st.session_state.username = None
+    st.rerun()
 
-    # Summary
-    st.subheader("📈 Summary")
-    total_income = df["income"].sum()
-    total_expense = df["expense"].sum()
-    total_profit = df["profit_loss"].sum()
-    st.write(f"**Total Income:** ₹{total_income}")
-    st.write(f"**Total Expenses:** ₹{total_expense}")
-    st.write(f"**Net Profit/Loss:** ₹{total_profit}")
+# -------------------------
+# APP ENTRY POINT
+# -------------------------
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
 
-    # Export Option
-    csv = df.to_csv(index=False).encode("utf-8")
-    st.download_button("⬇️ Download Transactions as CSV", csv, "transactions.csv", "text/csv")
+if st.session_state.logged_in:
+    main_app()
+else:
+    login_screen()
