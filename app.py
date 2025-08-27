@@ -204,3 +204,117 @@ if __name__ == "__main__":
     st.subheader("📊 All Service Entries")
     df = load_data()
     st.dataframe(df)
+    CATEGORIES = [
+    "NEW PAN CARD", "CORRECTION PAN CARD", "THUMB PAN CARD", "GAZZETED PAN CARD",
+    "BIRTH CERTIFICATES", "NEW PASSPORT", "MINOR PASSPORT", "REISSUE PASSPORT",
+    "DIGITAL SIGNATURE", "NEW AADHAR CARD", "ADDRESS CHANGE", "DATE OF BIRTH CHANGE",
+    "NAME CHANGE", "GENDER CHANGE", "NEW VOTER ID", "CORRECTION VOTER ID",
+    "AADHAR PRINT", "ONLINE SERVICES"
+]
+
+OFFICE_EXPENSES = [
+    "Office Rent", "Salaries", "Power Bill", "Water Bill",
+    "Stationery", "Repairs", "Food", "Miscellaneous"
+]
+def service_entry_page():
+    st.header("📝 Service Entry Form")
+
+    date = st.date_input("Date")
+    customer = st.text_input("Customer Name")
+    service_type = st.selectbox("Service Type", CATEGORIES)
+    expense = st.number_input("Expense (₹)", min_value=0.0, step=0.1)
+    income = st.number_input("Income (₹)", min_value=0.0, step=0.1)
+
+    payment_status = st.selectbox("Payment Status", ["Paid", "Pending", "Partial"])
+    amount_received = 0.0
+    if payment_status == "Partial":
+        amount_received = st.number_input("Amount Received (₹)", min_value=0.0, max_value=income, step=0.1)
+    elif payment_status == "Paid":
+        amount_received = income
+
+    remarks = st.text_area("Remarks")
+
+    if st.button("Save Service Entry"):
+        df = load_data()
+
+        profit = income - expense
+        pending = income - amount_received
+
+        new_entry = {
+            "Date": str(date),
+            "Type": "Service",
+            "Customer": customer,
+            "Service": service_type,
+            "Expense": expense,
+            "Income": income,
+            "Profit": profit,
+            "Payment Status": payment_status,
+            "Amount Received": amount_received,
+            "Pending Amount": pending,
+            "Remarks": remarks
+        }
+
+        df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
+        save_data(df)
+        st.success("✅ Service Entry Saved Successfully!")
+def expense_entry_page():
+    st.header("💰 Office Expense Entry")
+
+    date = st.date_input("Date")
+    expense_type = st.selectbox("Expense Category", OFFICE_EXPENSES)
+    amount = st.number_input("Amount (₹)", min_value=0.0, step=0.1)
+    remarks = st.text_area("Remarks")
+
+    if st.button("Save Expense Entry"):
+        df = load_data()
+
+        new_entry = {
+            "Date": str(date),
+            "Type": "Expense",
+            "Customer": "",
+            "Service": expense_type,
+            "Expense": amount,
+            "Income": 0.0,
+            "Profit": -amount,
+            "Payment Status": "",
+            "Amount Received": 0.0,
+            "Pending Amount": 0.0,
+            "Remarks": remarks
+        }
+
+        df = pd.concat([df, pd.DataFrame([new_entry])], ignore_index=True)
+        save_data(df)
+        st.success("✅ Expense Entry Saved Successfully!")
+def reports_page():
+    st.header("📊 Reports")
+
+    df = load_data()
+    if df.empty:
+        st.info("No data available yet.")
+        return
+
+    df["Date"] = pd.to_datetime(df["Date"])
+
+    # Opening & Closing Balance
+    df["Net Cash"] = df["Amount Received"] - df["Expense"]
+    daily_balance = df.groupby("Date")["Net Cash"].sum().cumsum().reset_index()
+    daily_balance.rename(columns={"Net Cash": "Closing Balance"}, inplace=True)
+    daily_balance["Opening Balance"] = daily_balance["Closing Balance"].shift(1).fillna(0)
+
+    st.subheader("📅 Daily Balances")
+    st.dataframe(daily_balance)
+
+    # Summary
+    st.subheader("📑 Summary")
+    total_income = df["Income"].sum()
+    total_expense = df["Expense"].sum()
+    total_received = df["Amount Received"].sum()
+    total_pending = df["Pending Amount"].sum()
+    closing_balance = daily_balance["Closing Balance"].iloc[-1]
+
+    st.metric("Total Income (₹)", f"{total_income:,.2f}")
+    st.metric("Total Expense (₹)", f"{total_expense:,.2f}")
+    st.metric("Total Received (₹)", f"{total_received:,.2f}")
+    st.metric("Total Pending (₹)", f"{total_pending:,.2f}")
+    st.metric("Closing Balance (₹)", f"{closing_balance:,.2f}")
+
