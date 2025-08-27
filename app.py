@@ -41,8 +41,5 @@ elif page == "View Transactions":
     if page == "Add Transaction":
         # add transaction code here...
 
-    elif page == "View Transactions":
-        st.header("All Transactions")
-        df = pd.read_sql("SELECT * FROM transactions", conn)
-        st.dataframe(df)
+
 
