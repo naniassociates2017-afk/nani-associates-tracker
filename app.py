@@ -18,3 +18,43 @@ def main():
 
 if __name__ == "__main__":
     main()
+import streamlit as st
+import pandas as pd
+from utils import load_data, save_data
+
+# Hardcoded login (you can change anytime)
+USERS = {"admin": "admin123", "nani": "sony@1430"}
+
+def login():
+    st.sidebar.subheader("🔑 Login Required")
+    username = st.sidebar.text_input("Username")
+    password = st.sidebar.text_input("Password", type="password")
+    if username in USERS and USERS[username] == password:
+        st.session_state["logged_in"] = True
+        st.success("✅ Login successful")
+    else:
+        if username and password:
+            st.error("❌ Invalid username or password")
+
+def main_app():
+    st.sidebar.title("📂 Menu")
+    menu = st.sidebar.radio("Select Page", ["Service Entry", "Expense Entry", "Reports", "Backup"])
+
+    if menu == "Backup":
+        df = load_data()
+        if not df.empty:
+            st.download_button("⬇️ Download Backup", df.to_csv(index=False).encode("utf-8"), "backup.csv")
+        uploaded = st.file_uploader("Upload Backup CSV")
+        if uploaded:
+            df = pd.read_csv(uploaded)
+            save_data(df)
+            st.success("✅ Backup restored successfully!")
+
+# --- Main ---
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+
+if not st.session_state["logged_in"]:
+    login()
+else:
+    main_app()
