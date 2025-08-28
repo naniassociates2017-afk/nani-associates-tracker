@@ -148,10 +148,4 @@ elif choice == "Daily Data Logger":
     else:
         st.write("No data available to export.")
  vetica", 10)
-                for row in df.to_string(index=False).split("\n"):
-                    text.textLine(row)
-                c.drawText(text)
-                c.showPage()
-                c.save()
-                st.download_button("Download PDF", pdf_file.getvalue(), "report.pdf")
-
+              
