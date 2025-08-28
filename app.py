@@ -242,7 +242,6 @@ st.title("Daily Data Logger")
 
 # Input for new entry
 st.subheader("Add New Entry")
-name = st.text_input("Enter Name")
 amount = st.number_input("Enter Amount", min_value=0)
 
 if st.button("Save Entry"):
