@@ -31,12 +31,6 @@ USER_CREDENTIALS = {
 def df_to_csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8")
 
-def df_to_excel_bytes(df: pd.DataFrame, sheet_name="Sheet1") -> bytes:
-    out = BytesIO()
-    with pd.ExcelWriter(out, engine="openpyxl") as writer:
-        df.to_excel(writer, index=False, sheet_name=sheet_name)
-    return out.getvalue()
-
 def load_csv(file_path, columns):
     if os.path.exists(file_path):
         df = pd.read_csv(file_path)
@@ -54,70 +48,15 @@ def ensure_datafiles_exist():
     exp_cols = ["id","date","user","category","amount","notes"]
     txn_cols = ["id","date","user","party","service_type","status","amount","notes"]
     sup_cols = ["id","date","user","supplier_name","service_type","paid_amt","pending_amt","partial_amt","notes"]
-    if not os.path.exists(FILES["services"]):
-        save_csv(pd.DataFrame(columns=svc_cols), FILES["services"])
-    if not os.path.exists(FILES["expenses"]):
-        save_csv(pd.DataFrame(columns=exp_cols), FILES["expenses"])
-    if not os.path.exists(FILES["transactions"]):
-        save_csv(pd.DataFrame(columns=txn_cols), FILES["transactions"])
-    if not os.path.exists(FILES["suppliers"]):
-        save_csv(pd.DataFrame(columns=sup_cols), FILES["suppliers"])
+    for key, cols in zip(FILES.keys(), [svc_cols, exp_cols, txn_cols, sup_cols]):
+        if not os.path.exists(FILES[key]):
+            save_csv(pd.DataFrame(columns=cols), FILES[key])
 
 def next_id(df):
     if df.empty:
         return 1
     else:
-        try:
-            return int(df["id"].max()) + 1
-        except Exception:
-            return len(df) + 1
-
-def edit_delete_table(df, file_path, key_prefix):
-    st.write("Click ✅ to edit, ❌ to delete")
-    for idx, row in df.iterrows():
-        cols = st.columns([1,1,1,1,1,1,1,1,1,1,1])
-        with cols[0]:
-            st.write(row["id"])
-        with cols[1]:
-            st.write(row.get("date",""))
-        with cols[2]:
-            st.write(row.get("customer",row.get("party",row.get("supplier_name",""))))
-        with cols[3]:
-            st.write(row.get("service_type",""))
-        with cols[4]:
-            st.write(row.get("num_apps",row.get("amount","")))
-        with cols[5]:
-            st.write(row.get("govt_amt",row.get("paid_amt","")))
-        with cols[6]:
-            st.write(row.get("paid_amt",""))
-        with cols[7]:
-            st.write(row.get("profit_amt",""))
-        with cols[8]:
-            st.write(row.get("status",""))
-        with cols[9]:
-            if st.button("✅", key=f"edit{key_prefix}{idx}"):
-                edit_row(row, df, file_path)
-        with cols[10]:
-            if st.button("❌", key=f"del{key_prefix}{idx}"):
-                df.drop(idx, inplace=True)
-                save_csv(df, file_path)
-                st.success("Deleted row")
-                st.experimental_rerun()
-
-def edit_row(row, df, file_path):
-    st.write("Editing row ID:", row["id"])
-    updated = {}
-    for col in df.columns:
-        if col=="id" or col=="user":
-            continue
-        val = st.text_input(f"{col}", value=str(row[col]))
-        updated[col]=val
-    if st.button("Save Changes"):
-        for col,val in updated.items():
-            df.loc[df["id"]==row["id"], col]=val
-        save_csv(df, file_path)
-        st.success("Updated row")
-        st.experimental_rerun()
+        return int(df["id"].max()) + 1
 
 # -------------------------
 # Session
@@ -153,6 +92,34 @@ def logout():
     st.session_state.device = None
     st.success("Logged out")
     st.rerun()
+
+# -------------------------
+# Table Display with Inline Edit/Delete
+# -------------------------
+def display_table(df, file_path, key_prefix, editable_cols):
+    if df.empty:
+        st.info("No data available")
+        return
+    st.dataframe(df)
+    for idx, row in df.iterrows():
+        with st.expander(f"Edit/Delete Row ID: {row['id']}"):
+            updated = {}
+            for col in editable_cols:
+                updated[col] = st.text_input(col, value=str(row[col]), key=f"{key_prefix}_{col}_{row['id']}")
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("Save", key=f"save_{key_prefix}_{row['id']}"):
+                    for col in editable_cols:
+                        df.loc[df["id"]==row["id"], col] = updated[col]
+                    save_csv(df, file_path)
+                    st.success("Row updated")
+                    st.experimental_rerun()
+            with col2:
+                if st.button("Delete", key=f"del_{key_prefix}_{row['id']}"):
+                    df.drop(idx, inplace=True)
+                    save_csv(df, file_path)
+                    st.success("Row deleted")
+                    st.experimental_rerun()
 
 # -------------------------
 # Pages
@@ -201,10 +168,7 @@ def service_entry_page():
                 st.rerun()
     st.subheader("Your Services")
     df_user = df[df["user"]==user].sort_values("date",ascending=False)
-    if not df_user.empty:
-        edit_delete_table(df_user, FILES["services"], "svc")
-    else:
-        st.info("No services yet")
+    display_table(df_user, FILES["services"], "svc", editable_cols=["customer","service_type","num_apps","govt_amt","paid_amt","profit_amt","status","notes"])
 
 def transactions_page():
     st.header("🔄 Transactions")
@@ -239,10 +203,7 @@ def transactions_page():
                 st.rerun()
     st.subheader("Your Transactions")
     df_user = df[df["user"]==user].sort_values("date",ascending=False)
-    if not df_user.empty:
-        edit_delete_table(df_user, FILES["transactions"], "txn")
-    else:
-        st.info("No transactions yet")
+    display_table(df_user, FILES["transactions"], "txn", editable_cols=["party","service_type","status","amount","notes"])
 
 def expenses_page():
     st.header("💸 Expenses")
@@ -273,10 +234,7 @@ def expenses_page():
                 st.rerun()
     st.subheader("Your Expenses")
     df_user = df[df["user"]==user].sort_values("date",ascending=False)
-    if not df_user.empty:
-        edit_delete_table(df_user, FILES["expenses"], "exp")
-    else:
-        st.info("No expenses yet")
+    display_table(df_user, FILES["expenses"], "exp", editable_cols=["category","amount","notes"])
 
 def suppliers_page():
     st.header("🏢 Suppliers")
@@ -313,10 +271,7 @@ def suppliers_page():
                 st.rerun()
     st.subheader("Your Suppliers")
     df_user = df[df["user"]==user].sort_values("date",ascending=False)
-    if not df_user.empty:
-        edit_delete_table(df_user, FILES["suppliers"], "sup")
-    else:
-        st.info("No suppliers yet")
+    display_table(df_user, FILES["suppliers"], "sup", editable_cols=["supplier_name","service_type","paid_amt","pending_amt","partial_amt","notes"])
 
 # -------------------------
 # Dashboard
@@ -336,7 +291,6 @@ def dashboard_page():
     df_exp_user = df_exp[df_exp["user"]==user]
     df_sup_user = df_sup[df_sup["user"]==user]
 
-    # Summary
     st.subheader("Service Summary")
     if not df_svc_user.empty:
         total_govt = df_svc_user["govt_amt"].sum()
