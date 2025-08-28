@@ -688,6 +688,38 @@ if not today_df.empty:
         today_df["time"] + " | " + today_df["name"] + " | " + today_df["amount"].astype(str),
         key="delete_selectbox"
     )
+import streamlit as st
+import pandas as pd
+import os
+from datetime import datetime
+from io import BytesIO
+
+# --- LOGIN/LOGOUT SECTION ---
+if "logged_in" not in st.session_state:
+    st.session_state.logged_in = False
+
+if not st.session_state.logged_in:
+    st.subheader("Login")
+    username = st.text_input("Username", key="login_user")
+    password = st.text_input("Password", type="password", key="login_pass")
+    if st.button("Login", key="login_button"):
+        # Replace these with your credentials
+        if username == "admin" and password == "password123":
+            st.session_state.logged_in = True
+            st.success("Logged in successfully!")
+            st.experimental_rerun()
+        else:
+            st.error("Invalid credentials")
+    st.stop()  # Stop execution if not logged in
+
+# --- LOGOUT BUTTON IN SIDEBAR ---
+st.sidebar.button("Logout", key="logout_button", on_click=lambda: st.session_state.update({"logged_in": False}))
+st.sidebar.write(f"Logged in as admin")
+
+# -----------------------------
+# Place all your main app code below this
+# Adding entries, deleting entries, viewing previous days, export, etc.
+# -----------------------------
 
         
 
