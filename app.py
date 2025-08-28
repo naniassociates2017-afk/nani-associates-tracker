@@ -4,7 +4,6 @@ import pandas as pd
 import os
 from datetime import date, timedelta
 from io import BytesIO
-import matplotlib.pyplot as plt
 
 # -------------------------
 # Config / Credentials
@@ -180,9 +179,50 @@ def service_entry_page():
     st.markdown("---")
     st.subheader("Your Services")
     df_user = df[df["user"]==user].sort_values("date", ascending=False)
-    st.dataframe(df_user.style.applymap(color_status, subset=["status"]), use_container_width=True)
-    st.download_button("⬇️ Download Services CSV", df_user.to_csv(index=False).encode(), f"services_{user}.csv")
-    st.download_button("⬇️ Download Services Excel", df_to_excel_bytes(df_user,"Services"), f"services_{user}.xlsx")
+    
+    # Filter by Payment Status
+    status_filter = st.multiselect("Filter by Payment Status", ["Paid","Pending","Partial"], default=["Paid","Pending","Partial"])
+    df_filtered = df_user[df_user["status"].isin(status_filter)]
+    
+    st.dataframe(df_filtered.style.applymap(color_status, subset=["status"]), use_container_width=True)
+    st.download_button("⬇️ Download Services CSV", df_filtered.to_csv(index=False).encode(), f"services_{user}.csv")
+    st.download_button("⬇️ Download Services Excel", df_to_excel_bytes(df_filtered,"Services"), f"services_{user}.xlsx")
+
+def transactions_entry_page():
+    st.header("💳 Transactions Entry")
+    user = st.session_state.user
+    txn_cols = ["id","date","user","party","service_type","status","amount","payment_type","notes"]
+    df = load_csv(FILES["transactions"], txn_cols)
+
+    with st.form("txn_add_form", clear_on_submit=True):
+        entry_date = st.date_input("Date", value=date.today())
+        party = st.text_input("Party Name")
+        service_type = st.text_input("Service Type")
+        status = st.selectbox("Payment Status", ["Paid","Pending","Partial"])
+        amount = st.number_input("Amount", min_value=0.0)
+        payment_type = st.selectbox("Payment Type", PAYMENT_TYPES)
+        notes = st.text_input("Notes (optional)")
+        if st.form_submit_button("➕ Add Transaction"):
+            if not party or not service_type:
+                st.error("Enter party and service type")
+            else:
+                nid = next_id(df)
+                new_row = {
+                    "id":nid,"date":entry_date.strftime("%Y-%m-%d"),"user":user,
+                    "party":party,"service_type":service_type,"status":status,"amount":amount,"payment_type":payment_type,"notes":notes
+                }
+                df = pd.concat([df,pd.DataFrame([new_row])], ignore_index=True)
+                save_csv(df, FILES["transactions"])
+                st.success("Transaction added ✅")
+    st.markdown("---")
+    st.subheader("Transactions")
+    df_user = df[df["user"]==user].sort_values("date", ascending=False)
+    
+    # Filter by Payment Status
+    status_filter = st.multiselect("Filter Transactions by Payment Status", ["Paid","Pending","Partial"], default=["Paid","Pending","Partial"])
+    df_filtered = df_user[df_user["status"].isin(status_filter)]
+    
+    st.dataframe(df_filtered.style.applymap(color_status, subset=["status"]), use_container_width=True)
 
 # Expenses Entry
 def expenses_entry_page():
@@ -214,38 +254,6 @@ def expenses_entry_page():
     st.dataframe(df_user, use_container_width=True)
     st.download_button("⬇️ Download Expenses CSV", df_user.to_csv(index=False).encode(), f"expenses_{user}.csv")
     st.download_button("⬇️ Download Expenses Excel", df_to_excel_bytes(df_user,"Expenses"), f"expenses_{user}.xlsx")
-
-# Transactions Entry
-def transactions_entry_page():
-    st.header("💳 Transactions Entry")
-    user = st.session_state.user
-    txn_cols = ["id","date","user","party","service_type","status","amount","payment_type","notes"]
-    df = load_csv(FILES["transactions"], txn_cols)
-
-    with st.form("txn_add_form", clear_on_submit=True):
-        entry_date = st.date_input("Date", value=date.today())
-        party = st.text_input("Party Name")
-        service_type = st.text_input("Service Type")
-        status = st.selectbox("Payment Status", ["Paid","Pending","Partial"])
-        amount = st.number_input("Amount", min_value=0.0)
-        payment_type = st.selectbox("Payment Type", PAYMENT_TYPES)
-        notes = st.text_input("Notes (optional)")
-        if st.form_submit_button("➕ Add Transaction"):
-            if not party or not service_type:
-                st.error("Enter party and service type")
-            else:
-                nid = next_id(df)
-                new_row = {
-                    "id":nid,"date":entry_date.strftime("%Y-%m-%d"),"user":user,
-                    "party":party,"service_type":service_type,"status":status,"amount":amount,"payment_type":payment_type,"notes":notes
-                }
-                df = pd.concat([df,pd.DataFrame([new_row])], ignore_index=True)
-                save_csv(df, FILES["transactions"])
-                st.success("Transaction added ✅")
-    st.markdown("---")
-    st.subheader("Transactions")
-    df_user = df[df["user"]==user].sort_values("date", ascending=False)
-    st.dataframe(df_user.style.applymap(color_status, subset=["status"]), use_container_width=True)
 
 # Suppliers Entry
 def suppliers_entry_page():
@@ -316,7 +324,6 @@ def dashboard_summary():
 
     # ----------------- Charts -----------------
     st.subheader("📈 Service / Product Analytics")
-
     period = st.selectbox("Select Period", ["Daily","Weekly","Monthly","All"])
     df_svc_period = filter_date(df_svc_user, "date", period)
     if not df_svc_period.empty:
