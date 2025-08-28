@@ -99,6 +99,54 @@ elif menu == "Service Entry":
                 new_data.to_csv(file_path, index=False)
 
             st.success("✅ Service entry saved successfully!")
+            if menu == "Expense Entry":
+    st.header("💰 Expense Entry")
+    # your expense entry code here
+
+elif menu == "Reports":
+    st.header("📊 Reports")
+    # your reports code here
+
+elif menu == "Daily Data Logger":
+    st.header("📓 Daily Data Logger")
+    # your daily data logger code here
+
+elif menu == "Service Entry":   # 👈 Paste here
+    st.header("📝 Service Entry")
+
+    with st.form("service_form", clear_on_submit=True):
+        date = st.date_input("Date")
+        service_type = st.selectbox("Service Type", ["Consulting", "Installation", "Maintenance", "Other"])
+        client_name = st.text_input("Client Name")
+        agent_name = st.text_input("Agent")
+        amount = st.number_input("Amount", min_value=0.0, step=0.1)
+        remarks = st.text_area("Remarks")
+
+        submitted = st.form_submit_button("Save Service Entry")
+
+        if submitted:
+            import pandas as pd
+            import os
+
+            os.makedirs("transactions", exist_ok=True)
+            file_path = os.path.join("transactions", f"service_entries.csv")
+
+            new_data = pd.DataFrame([{
+                "Date": date,
+                "Service Type": service_type,
+                "Client": client_name,
+                "Agent": agent_name,
+                "Amount": amount,
+                "Remarks": remarks
+            }])
+
+            if os.path.exists(file_path):
+                new_data.to_csv(file_path, mode="a", header=False, index=False)
+            else:
+                new_data.to_csv(file_path, index=False)
+
+            st.success("✅ Service entry saved successfully!")
+
 
 # -------------------
 # EXPENSE ENTRY (placeholder)
