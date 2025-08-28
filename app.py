@@ -4,6 +4,7 @@ import pandas as pd
 import os
 from datetime import date, timedelta
 from io import BytesIO
+import matplotlib.pyplot as plt
 
 # -------------------------
 # Config / Credentials
@@ -90,8 +91,6 @@ if "user" not in st.session_state:
     st.session_state.user = None
 if "device" not in st.session_state:
     st.session_state.device = None
-if "login_attempted" not in st.session_state:
-    st.session_state.login_attempted = False
 
 ensure_datafiles_exist()
 
@@ -115,18 +114,17 @@ def login_page():
             if username in USER_CREDENTIALS and USER_CREDENTIALS[username]==password:
                 st.session_state.user = username
                 st.session_state.device = "mobile" if username=="mobile" else "desktop"
-                st.session_state.login_attempted = True
+                st.success(f"Logged in as {username}")
             else:
                 st.error("Invalid username or password")
 
 def logout():
     st.session_state.user = None
     st.session_state.device = None
-    st.session_state.login_attempted = False
     st.success("Logged out")
 
 # -------------------------
-# SERVICE ENTRY
+# Service Entry
 # -------------------------
 def service_entry_page():
     st.header("📝 Service Entry")
@@ -167,17 +165,16 @@ def service_entry_page():
                 df = pd.concat([df,pd.DataFrame([new_row])], ignore_index=True)
                 save_csv(df, FILES["services"])
                 st.success("Service added ✅")
-                st.session_state.login_attempted = True
 
     st.markdown("---")
     st.subheader("Your Services")
     df_user = df[df["user"]==user].sort_values("date", ascending=False)
     st.dataframe(df_user, use_container_width=True)
-    st.download_button("⬇️ Download Services CSV", df_to_csv_bytes(df_user), f"services_{user}.csv")
+    st.download_button("⬇️ Download Services CSV", df_user.to_csv(index=False).encode(), f"services_{user}.csv")
     st.download_button("⬇️ Download Services Excel", df_to_excel_bytes(df_user,"Services"), f"services_{user}.xlsx")
 
 # -------------------------
-# EXPENSE ENTRY
+# Expense Entry
 # -------------------------
 def expense_entry_page():
     st.header("💰 Expense Entry")
@@ -186,187 +183,153 @@ def expense_entry_page():
     df = load_csv(FILES["expenses"], exp_cols)
 
     with st.form("exp_add_form", clear_on_submit=True):
-        e_date = st.date_input("Date", value=date.today())
-        category = st.selectbox("Expense Category", ["Salaries","Office Rent","Power Bill","Water Bill","Stationery","Furniture Repair","Printing Bill","Food","Other"])
-        amount = st.number_input("Amount (₹)", min_value=0.0, value=0.0)
-        notes = st.text_input("Notes (optional)")
+        c1,c2 = st.columns(2)
+        with c1:
+            entry_date = st.date_input("Date", value=date.today())
+            category = st.text_input("Category")
+        with c2:
+            amount = st.number_input("Amount", min_value=0.0, value=0.0)
+            notes = st.text_input("Notes (optional)")
         if st.form_submit_button("➕ Add Expense"):
-            if amount<=0:
-                st.error("Amount must be >0")
+            if not category:
+                st.error("Enter expense category")
             else:
                 nid = next_id(df)
-                df = pd.concat([df,pd.DataFrame([{
-                    "id":nid,"date":e_date.strftime("%Y-%m-%d"),"user":user,
-                    "category":category,"amount":round(float(amount),2),"notes":notes
-                }])], ignore_index=True)
+                new_row = {"id":nid,"date":entry_date.strftime("%Y-%m-%d"),"user":user,
+                           "category":category,"amount":amount,"notes":notes}
+                df = pd.concat([df,pd.DataFrame([new_row])], ignore_index=True)
                 save_csv(df, FILES["expenses"])
                 st.success("Expense added ✅")
-                st.session_state.login_attempted = True
 
     st.markdown("---")
     st.subheader("Your Expenses")
     df_user = df[df["user"]==user].sort_values("date", ascending=False)
     st.dataframe(df_user, use_container_width=True)
-    st.download_button("⬇️ Download Expenses CSV", df_to_csv_bytes(df_user), f"expenses_{user}.csv")
+    st.download_button("⬇️ Download Expenses CSV", df_user.to_csv(index=False).encode(), f"expenses_{user}.csv")
     st.download_button("⬇️ Download Expenses Excel", df_to_excel_bytes(df_user,"Expenses"), f"expenses_{user}.xlsx")
 
 # -------------------------
-# TRANSACTIONS
+# Transactions Page
 # -------------------------
 def transactions_page():
-    st.header("🔄 Transactions")
+    st.header("💳 Transactions")
     user = st.session_state.user
     txn_cols = ["id","date","user","party","service_type","status","amount","notes"]
     df = load_csv(FILES["transactions"], txn_cols)
 
     with st.form("txn_add_form", clear_on_submit=True):
-        t_date = st.date_input("Date", value=date.today())
-        party = st.text_input("Customer / Agent")
-        service_type = st.selectbox("Service Type (optional)", ["","NEW PAN CARD","CORRECTION PAN CARD","NEW PASSPORT","RENEWAL PASSPORT","NEW AADHAR CARD","OTHER"])
-        status = st.selectbox("Payment Status", ["Paid","Pending","Partial"])
-        amount = st.number_input("Amount (₹)", min_value=0.0, value=0.0)
-        notes = st.text_input("Notes (optional)")
+        c1,c2 = st.columns(2)
+        with c1:
+            entry_date = st.date_input("Date", value=date.today())
+            party = st.text_input("Party / Customer")
+            service_type = st.selectbox("Service Type", ["NEW PAN CARD","CORRECTION PAN CARD","NEW PASSPORT","RENEWAL PASSPORT","DIGITAL SIGNATURE","VOTER ID"])
+        with c2:
+            status = st.selectbox("Payment Status", ["Paid","Pending","Partial"])
+            amount = st.number_input("Amount", min_value=0.0, value=0.0)
+            notes = st.text_input("Notes (optional)")
         if st.form_submit_button("➕ Add Transaction"):
             if not party:
-                st.error("Enter customer/agent name")
+                st.error("Enter party / customer")
             else:
                 nid = next_id(df)
-                df = pd.concat([df,pd.DataFrame([{
-                    "id":nid,"date":t_date.strftime("%Y-%m-%d"),"user":user,
-                    "party":party,"service_type":service_type,"status":status,
-                    "amount":round(float(amount),2),"notes":notes
-                }])], ignore_index=True)
+                new_row = {"id":nid,"date":entry_date.strftime("%Y-%m-%d"),"user":user,
+                           "party":party,"service_type":service_type,"status":status,"amount":amount,"notes":notes}
+                df = pd.concat([df,pd.DataFrame([new_row])], ignore_index=True)
                 save_csv(df, FILES["transactions"])
                 st.success("Transaction added ✅")
-                st.session_state.login_attempted = True
 
     st.markdown("---")
     st.subheader("Your Transactions")
     df_user = df[df["user"]==user].sort_values("date", ascending=False)
     st.dataframe(df_user, use_container_width=True)
-    # ----------------- Separate Totals -----------------
-    paid_sum = df_user[df_user["status"]=="Paid"]["amount"].sum()
-    pending_sum = df_user[df_user["status"]=="Pending"]["amount"].sum()
-    partial_sum = df_user[df_user["status"]=="Partial"]["amount"].sum()
-    st.info(f"Total Paid: ₹{paid_sum} | Pending: ₹{pending_sum} | Partial: ₹{partial_sum}")
-    st.download_button("⬇️ Download Transactions CSV", df_to_csv_bytes(df_user), f"transactions_{user}.csv")
+    st.download_button("⬇️ Download Transactions CSV", df_user.to_csv(index=False).encode(), f"transactions_{user}.csv")
     st.download_button("⬇️ Download Transactions Excel", df_to_excel_bytes(df_user,"Transactions"), f"transactions_{user}.xlsx")
 
 # -------------------------
-# SUPPLIER MANAGEMENT
+# Suppliers Page
 # -------------------------
 def suppliers_page():
-    st.header("🏭 Supplier Management")
+    st.header("🏢 Supplier / Partner Entry")
     user = st.session_state.user
     sup_cols = ["id","date","user","supplier_name","service_type","paid_amt","pending_amt","partial_amt","notes"]
     df = load_csv(FILES["suppliers"], sup_cols)
 
     with st.form("sup_add_form", clear_on_submit=True):
-        s_date = st.date_input("Date", value=date.today())
-        supplier_name = st.text_input("Supplier Name")
-        service_type = st.selectbox("Service Type (optional)", ["","NEW PAN CARD","CORRECTION PAN CARD","NEW PASSPORT","RENEWAL PASSPORT","NEW AADHAR CARD","OTHER"])
-        paid_amt = st.number_input("Paid Amount", min_value=0.0, value=0.0)
-        pending_amt = st.number_input("Pending Amount", min_value=0.0, value=0.0)
-        partial_amt = st.number_input("Partial Amount", min_value=0.0, value=0.0)
-        notes = st.text_input("Notes (optional)")
-
-        if st.form_submit_button("➕ Add Supplier Payment"):
+        c1,c2 = st.columns(2)
+        with c1:
+            entry_date = st.date_input("Date", value=date.today())
+            supplier_name = st.text_input("Supplier Name")
+            service_type = st.selectbox("Service Type", ["NEW PAN CARD","CORRECTION PAN CARD","NEW PASSPORT","RENEWAL PASSPORT"])
+        with c2:
+            paid_amt = st.number_input("Paid Amount", min_value=0.0, value=0.0)
+            pending_amt = st.number_input("Pending Amount", min_value=0.0, value=0.0)
+            partial_amt = st.number_input("Partial Amount", min_value=0.0, value=0.0)
+            notes = st.text_input("Notes (optional)")
+        if st.form_submit_button("➕ Add Supplier Entry"):
             if not supplier_name:
                 st.error("Enter supplier name")
             else:
                 nid = next_id(df)
-                df = pd.concat([df,pd.DataFrame([{
-                    "id":nid,"date":s_date.strftime("%Y-%m-%d"),"user":user,
-                    "supplier_name":supplier_name,"service_type":service_type,
-                    "paid_amt":round(float(paid_amt),2),
-                    "pending_amt":round(float(pending_amt),2),
-                    "partial_amt":round(float(partial_amt),2),
-                    "notes":notes
-                }])], ignore_index=True)
+                new_row = {"id":nid,"date":entry_date.strftime("%Y-%m-%d"),"user":user,
+                           "supplier_name":supplier_name,"service_type":service_type,
+                           "paid_amt":paid_amt,"pending_amt":pending_amt,"partial_amt":partial_amt,"notes":notes}
+                df = pd.concat([df,pd.DataFrame([new_row])], ignore_index=True)
                 save_csv(df, FILES["suppliers"])
-                st.success("Supplier payment added ✅")
-                st.session_state.login_attempted = True
+                st.success("Supplier entry added ✅")
 
     st.markdown("---")
-    st.subheader("Supplier Payments")
+    st.subheader("Your Suppliers")
     df_user = df[df["user"]==user].sort_values("date", ascending=False)
     st.dataframe(df_user, use_container_width=True)
-    paid_sum = df_user["paid_amt"].sum()
-    pending_sum = df_user["pending_amt"].sum()
-    partial_sum = df_user["partial_amt"].sum()
-    st.info(f"Total Paid: ₹{paid_sum} | Pending: ₹{pending_sum} | Partial: ₹{partial_sum}")
-    st.download_button("⬇️ Download Suppliers CSV", df_to_csv_bytes(df_user), f"suppliers_{user}.csv")
+    st.download_button("⬇️ Download Suppliers CSV", df_user.to_csv(index=False).encode(), f"suppliers_{user}.csv")
     st.download_button("⬇️ Download Suppliers Excel", df_to_excel_bytes(df_user,"Suppliers"), f"suppliers_{user}.xlsx")
 
 # -------------------------
-# REPORTS & CHARTS
+# Reports & Analytics
 # -------------------------
 def reports_page():
     st.header("📊 Reports & Analytics")
     user = st.session_state.user
     svc_cols = ["id","date","user","customer","service_type","num_apps","govt_amt","paid_amt","profit_amt","status","notes"]
-    exp_cols = ["id","date","user","category","amount","notes"]
-    txn_cols = ["id","date","user","party","service_type","status","amount","notes"]
-    sup_cols = ["id","date","user","supplier_name","service_type","paid_amt","pending_amt","partial_amt","notes"]
+    df = load_csv(FILES["services"], svc_cols)
+    df_user = df[df["user"]==user]
+    
+    period = st.radio("Select Period", ["Daily","Weekly","Monthly","All Time"])
+    df_period = filter_date(df_user, "date", period)
+    
+    st.subheader("📈 Product-wise Flow")
+    prod_group = df_period.groupby("service_type").agg({"num_apps":"sum","govt_amt":"sum","paid_amt":"sum","profit_amt":"sum"}).reset_index()
+    st.dataframe(prod_group)
 
-    df_svc = load_csv(FILES["services"], svc_cols)
-    df_exp = load_csv(FILES["expenses"], exp_cols)
-    df_txn = load_csv(FILES["transactions"], txn_cols)
-    df_sup = load_csv(FILES["suppliers"], sup_cols)
+    st.subheader("💹 Charts")
+    if not prod_group.empty:
+        fig, ax = plt.subplots(figsize=(10,5))
+        ax.bar(prod_group["service_type"], prod_group["num_apps"])
+        ax.set_xticklabels(prod_group["service_type"], rotation=45, ha="right")
+        ax.set_ylabel("No. of Applications")
+        st.pyplot(fig)
 
-    period = st.selectbox("Select Period", ["Daily","Weekly","Monthly"])
-    df_svc_period = filter_date(df_svc, period=period)
-    df_exp_period = filter_date(df_exp, period=period)
-    df_txn_period = filter_date(df_txn, period=period)
-    df_sup_period = filter_date(df_sup, period=period)
-
-    st.subheader(f"Service Summary ({period})")
-    svc_summary = df_svc_period.groupby("service_type").agg({
-        "num_apps":"sum","govt_amt":"sum","paid_amt":"sum","profit_amt":"sum"
-    }).reset_index()
-    st.dataframe(svc_summary, use_container_width=True)
-    if not svc_summary.empty:
-        st.bar_chart(svc_summary.set_index("service_type")["num_apps"])
-
-    st.subheader("Transactions Status Summary")
-    paid = df_txn_period[df_txn_period["status"]=="Paid"]["amount"].sum()
-    pending = df_txn_period[df_txn_period["status"]=="Pending"]["amount"].sum()
-    partial = df_txn_period[df_txn_period["status"]=="Partial"]["amount"].sum()
-    st.info(f"Paid: ₹{paid} | Pending: ₹{pending} | Partial: ₹{partial}")
-
-    st.subheader("Supplier Status Summary")
-    sup_paid = df_sup_period["paid_amt"].sum()
-    sup_pending = df_sup_period["pending_amt"].sum()
-    sup_partial = df_sup_period["partial_amt"].sum()
-    st.info(f"Paid: ₹{sup_paid} | Pending: ₹{sup_pending} | Partial: ₹{sup_partial}")
-
-    st.subheader(f"Profit & Loss ({period})")
-    total_income = df_svc_period["paid_amt"].sum()
-    total_profit = df_svc_period["profit_amt"].sum()
-    total_expenses = df_exp_period["amount"].sum()
-    net_profit = total_profit - total_expenses - sup_paid
-    st.write(f"**Total Income:** ₹{total_income}")
-    st.write(f"**Total Profit (from services):** ₹{total_profit}")
-    st.write(f"**Total Expenses:** ₹{total_expenses}")
-    st.write(f"**Supplier Paid:** ₹{sup_paid}")
-    st.write(f"**Net Profit:** ₹{net_profit}")
+    st.subheader("💰 Profit & Loss Summary")
+    total_govt = df_period["govt_amt"].sum()
+    total_paid = df_period["paid_amt"].sum()
+    total_profit = df_period["profit_amt"].sum()
+    st.write(f"**Total Govt Amount:** ₹{total_govt}")
+    st.write(f"**Total Paid Amount:** ₹{total_paid}")
+    st.write(f"**Profit:** ₹{total_profit}")
 
 # -------------------------
-# Main App
+# Main
 # -------------------------
 def main():
     st.set_page_config(page_title="NANI ASSOCIATES - Tracker", layout="wide")
     if st.session_state.user is None:
         login_page()
-        if st.session_state.login_attempted:
-            st.experimental_rerun()
         return
 
     st.sidebar.title("📊 NANI ASSOCIATES")
     st.sidebar.write(f"Logged in as: **{st.session_state.user}** ({st.session_state.device})")
     if st.sidebar.button("Logout"):
         logout()
-        st.experimental_rerun()
 
     page = st.sidebar.radio("Menu", [
         "Service Entry",
