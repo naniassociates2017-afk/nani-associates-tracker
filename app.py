@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import date, datetime
+from datetime import date
 
 # ---------------------------
 # Initialize session state
@@ -11,14 +11,8 @@ if "services" not in st.session_state:
 if "expenses" not in st.session_state:
     st.session_state.expenses = []
 
-if "transactions" not in st.session_state:
-    st.session_state.transactions = []
-
 if "suppliers" not in st.session_state:
     st.session_state.suppliers = []
-
-if "logged_in" not in st.session_state:
-    st.session_state.logged_in = True  # fake login for now
 
 
 # ---------------------------
@@ -37,6 +31,7 @@ def page_service_entry():
     st.header("📝 Service Entry")
 
     with st.form("service_form", clear_on_submit=True):
+        entry_date = st.date_input("Date", value=date.today())
         customer = st.text_input("Customer / Agent Name")
         service_name = st.selectbox("Service", ["PAN", "Passport", "Aadhaar", "Birth Certificate", "Other"])
         applications = st.number_input("No. of Applications", min_value=1, step=1)
@@ -48,22 +43,44 @@ def page_service_entry():
 
         if submit and customer:
             st.session_state.services.append([
-                date.today().strftime("%Y-%m-%d"),
-                customer, service_name, applications,
+                str(entry_date), customer, service_name, applications,
                 govt_amt, paid_amt, profit_amt
             ])
             st.success("Service added successfully!")
 
+    st.write("### All Service Entries")
     df = to_df(st.session_state.services,
                ["Date", "Customer", "Service", "Applications", "Govt Amt", "Paid Amt", "Profit Amt"])
-    st.write("### All Service Entries")
-    st.dataframe(df)
+
+    for i, row in df.iterrows():
+        cols = st.columns([6, 1, 1])
+        cols[0].write(row.to_dict())
+        if cols[1].button("✏️ Edit", key=f"edit_service_{i}"):
+            with st.form(f"edit_service_form_{i}"):
+                new_date = st.date_input("Date", value=pd.to_datetime(row["Date"]))
+                new_customer = st.text_input("Customer", value=row["Customer"])
+                new_service = st.text_input("Service", value=row["Service"])
+                new_apps = st.number_input("Applications", value=int(row["Applications"]), step=1)
+                new_govt = st.number_input("Govt Amt", value=float(row["Govt Amt"]))
+                new_paid = st.number_input("Paid Amt", value=float(row["Paid Amt"]))
+                new_profit = new_paid - new_govt
+                save = st.form_submit_button("Save Changes")
+                if save:
+                    st.session_state.services[i] = [str(new_date), new_customer, new_service,
+                                                    new_apps, new_govt, new_paid, new_profit]
+                    st.success("Service updated!")
+                    st.experimental_rerun()
+        if cols[2].button("🗑️ Delete", key=f"delete_service_{i}"):
+            st.session_state.services.pop(i)
+            st.warning("Service deleted!")
+            st.experimental_rerun()
 
 
 def page_expense_entry():
     st.header("💰 Expense Entry")
 
     with st.form("expense_form", clear_on_submit=True):
+        entry_date = st.date_input("Date", value=date.today())
         expense_type = st.selectbox("Expense Type", [
             "Salaries", "Office Rent", "Power Bill", "Water Bill",
             "Stationary", "Printing Bill", "Furniture Repair", "Food", "Other"
@@ -73,14 +90,30 @@ def page_expense_entry():
 
         if submit and amount > 0:
             st.session_state.expenses.append([
-                date.today().strftime("%Y-%m-%d"),
-                expense_type, amount
+                str(entry_date), expense_type, amount
             ])
             st.success("Expense added successfully!")
 
-    df = to_df(st.session_state.expenses, ["Date", "Expense", "Amount"])
     st.write("### All Expenses")
-    st.dataframe(df)
+    df = to_df(st.session_state.expenses, ["Date", "Expense", "Amount"])
+
+    for i, row in df.iterrows():
+        cols = st.columns([6, 1, 1])
+        cols[0].write(row.to_dict())
+        if cols[1].button("✏️ Edit", key=f"edit_expense_{i}"):
+            with st.form(f"edit_expense_form_{i}"):
+                new_date = st.date_input("Date", value=pd.to_datetime(row["Date"]))
+                new_expense = st.text_input("Expense", value=row["Expense"])
+                new_amt = st.number_input("Amount", value=float(row["Amount"]))
+                save = st.form_submit_button("Save Changes")
+                if save:
+                    st.session_state.expenses[i] = [str(new_date), new_expense, new_amt]
+                    st.success("Expense updated!")
+                    st.experimental_rerun()
+        if cols[2].button("🗑️ Delete", key=f"delete_expense_{i}"):
+            st.session_state.expenses.pop(i)
+            st.warning("Expense deleted!")
+            st.experimental_rerun()
 
 
 def page_reports():
@@ -90,26 +123,6 @@ def page_reports():
                         ["Date", "Customer", "Service", "Applications", "Govt Amt", "Paid Amt", "Profit Amt"])
     df_expenses = to_df(st.session_state.expenses, ["Date", "Expense", "Amount"])
 
-    # Filters
-    filter_type = st.selectbox("Filter By", ["Daily", "Weekly", "Monthly", "All"])
-    today = date.today()
-
-    if filter_type == "Daily":
-        df_services = df_services[df_services["Date"] == today.strftime("%Y-%m-%d")]
-        df_expenses = df_expenses[df_expenses["Date"] == today.strftime("%Y-%m-%d")]
-    elif filter_type == "Weekly":
-        week_start = today - pd.to_timedelta(today.weekday(), unit="d")
-        df_services["Date"] = pd.to_datetime(df_services["Date"])
-        df_expenses["Date"] = pd.to_datetime(df_expenses["Date"])
-        df_services = df_services[df_services["Date"] >= week_start]
-        df_expenses = df_expenses[df_expenses["Date"] >= week_start]
-    elif filter_type == "Monthly":
-        df_services["Date"] = pd.to_datetime(df_services["Date"])
-        df_expenses["Date"] = pd.to_datetime(df_expenses["Date"])
-        df_services = df_services[df_services["Date"].dt.month == today.month]
-        df_expenses = df_expenses[df_expenses["Date"].dt.month == today.month]
-
-    # Totals
     total_income = df_services["Paid Amt"].sum() if not df_services.empty else 0
     total_expenses = df_expenses["Amount"].sum() if not df_expenses.empty else 0
     profit_loss = total_income - total_expenses
@@ -129,7 +142,7 @@ def page_daily_logger():
     st.header("📅 Daily Data Logger")
     df = to_df(st.session_state.services,
                ["Date", "Customer", "Service", "Applications", "Govt Amt", "Paid Amt", "Profit Amt"])
-    today = date.today().strftime("%Y-%m-%d")
+    today = str(date.today())
     df_today = df[df["Date"] == today]
     st.write(f"### Services logged for {today}")
     st.dataframe(df_today)
@@ -139,22 +152,21 @@ def page_transactions():
     st.header("💳 Agent/Customer Transactions")
 
     name = st.text_input("Search by Name")
-    status = st.selectbox("Status", ["Paid", "Pending", "Partial"])
-
     df = to_df(st.session_state.services,
                ["Date", "Customer", "Service", "Applications", "Govt Amt", "Paid Amt", "Profit Amt"])
 
-    if not name and not df.empty:
-        st.dataframe(df)
-    else:
+    if name:
         filtered = df[df["Customer"].str.contains(name, case=False, na=False)]
         st.dataframe(filtered)
+    else:
+        st.dataframe(df)
 
 
 def page_suppliers():
     st.header("🏢 Suppliers")
 
     with st.form("supplier_form", clear_on_submit=True):
+        entry_date = st.date_input("Date", value=date.today())
         supplier = st.text_input("Supplier Name")
         service = st.text_input("Service Type")
         paid = st.number_input("Paid Amount", min_value=0.0, step=100.0)
@@ -163,14 +175,33 @@ def page_suppliers():
 
         if submit and supplier:
             st.session_state.suppliers.append([
-                supplier, service, paid, pending
+                str(entry_date), supplier, service, paid, pending
             ])
             st.success("Supplier added successfully!")
 
-    df = to_df(st.session_state.suppliers,
-               ["Supplier", "Service", "Paid Amt", "Pending Amt"])
     st.write("### All Suppliers")
-    st.dataframe(df)
+    df = to_df(st.session_state.suppliers,
+               ["Date", "Supplier", "Service", "Paid Amt", "Pending Amt"])
+
+    for i, row in df.iterrows():
+        cols = st.columns([6, 1, 1])
+        cols[0].write(row.to_dict())
+        if cols[1].button("✏️ Edit", key=f"edit_supplier_{i}"):
+            with st.form(f"edit_supplier_form_{i}"):
+                new_date = st.date_input("Date", value=pd.to_datetime(row["Date"]))
+                new_supplier = st.text_input("Supplier", value=row["Supplier"])
+                new_service = st.text_input("Service", value=row["Service"])
+                new_paid = st.number_input("Paid Amt", value=float(row["Paid Amt"]))
+                new_pending = st.number_input("Pending Amt", value=float(row["Pending Amt"]))
+                save = st.form_submit_button("Save Changes")
+                if save:
+                    st.session_state.suppliers[i] = [str(new_date), new_supplier, new_service, new_paid, new_pending]
+                    st.success("Supplier updated!")
+                    st.experimental_rerun()
+        if cols[2].button("🗑️ Delete", key=f"delete_supplier_{i}"):
+            st.session_state.suppliers.pop(i)
+            st.warning("Supplier deleted!")
+            st.experimental_rerun()
 
 
 def page_balances():
