@@ -147,5 +147,5 @@ elif choice == "Daily Data Logger":
         )
     else:
         st.write("No data available to export.")
- vetica", 10)
+
               
