@@ -689,8 +689,7 @@ if not today_df.empty:
         today_df["time"] + " | " + today_df["name"] + " | " + today_df["amount"].astype(str),
         key="delete_selectbox"
     )
-    if st.button("Delete Entry", key="delete_button"):
-        row_to_delete = today_df.index[
+
         
 
 
