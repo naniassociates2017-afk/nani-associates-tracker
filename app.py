@@ -17,7 +17,6 @@ FILES = {
     "expenses": os.path.join(DATA_FOLDER, "expenses.csv"),
     "transactions": os.path.join(DATA_FOLDER, "transactions.csv"),
     "suppliers": os.path.join(DATA_FOLDER, "suppliers.csv"),
-    "users": os.path.join(DATA_FOLDER, "users.csv"),  # optional future use
 }
 
 # Hardcoded users (3 desktop + 1 mobile)
@@ -41,17 +40,15 @@ def df_to_excel_bytes(df: pd.DataFrame, sheet_name="Sheet1") -> bytes:
     return out.getvalue()
 
 def load_csv(file_path, columns):
-    """Load CSV if exists else return empty DataFrame with columns."""
     if os.path.exists(file_path):
         try:
             df = pd.read_csv(file_path)
-            # Ensure columns exist (in case file was edited)
+            # Ensure expected columns exist
             for c in columns:
                 if c not in df.columns:
                     df[c] = ""
             return df[columns]
         except Exception:
-            # on corrupted file, return empty safe frame
             return pd.DataFrame(columns=columns)
     return pd.DataFrame(columns=columns)
 
@@ -59,7 +56,6 @@ def save_csv(df, file_path):
     df.to_csv(file_path, index=False)
 
 def ensure_datafiles_exist():
-    # Create empty files with headers if missing
     svc_cols = ["id","date","user","customer","service_type","num_apps","govt_amt","paid_amt","profit_amt","notes"]
     exp_cols = ["id","date","user","category","amount","notes"]
     txn_cols = ["id","date","user","party","service_type","status","amount","notes"]
@@ -86,7 +82,7 @@ def next_id(df):
 # Session state init
 # -------------------------
 if "user" not in st.session_state:
-    st.session_state.user = None  # username string
+    st.session_state.user = None
 if "device" not in st.session_state:
     st.session_state.device = None
 
@@ -111,10 +107,9 @@ def login_page():
         if submitted:
             if username in USER_CREDENTIALS and USER_CREDENTIALS[username] == password:
                 st.session_state.user = username
-                # set device label
                 st.session_state.device = "mobile" if username == "mobile" else "desktop"
                 st.success(f"Welcome {username} 👋")
-                st.experimental_rerun()
+                st.rerun()
             else:
                 st.error("Invalid username or password")
 
@@ -122,7 +117,7 @@ def logout():
     st.session_state.user = None
     st.session_state.device = None
     st.success("Logged out")
-    st.experimental_rerun()
+    st.rerun()
 
 # -------------------------
 # SERVICES: add / edit / delete
@@ -174,18 +169,16 @@ def service_entry_page():
                 df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
                 save_csv(df, FILES["services"])
                 st.success("Service added ✅")
-                st.experimental_rerun()
+                st.rerun()
 
     st.markdown("---")
     st.subheader("Your Services (most recent first)")
-    # show only current user's services
     df_user = df[df["user"] == user].sort_values("date", ascending=False)
     if df_user.empty:
         st.info("No services yet")
     else:
         st.dataframe(df_user, use_container_width=True)
 
-        # Edit / Delete by ID
         col1, col2, col3 = st.columns([2,1,1])
         with col1:
             try:
@@ -240,7 +233,6 @@ def service_entry_page():
                         st.success("Service deleted ✅")
                         st.rerun()
 
-        # Exports for user's services
         st.download_button("⬇️ Download Services CSV (You)", df_to_csv_bytes(df_user), f"services_{user}.csv", key=f"dl_svc_{user}_csv")
         st.download_button("⬇️ Download Services Excel (You)", df_to_excel_bytes(df_user, "Services"), f"services_{user}.xlsx", key=f"dl_svc_{user}_xlsx")
 
@@ -274,7 +266,7 @@ def expense_entry_page():
                 }])], ignore_index=True)
                 save_csv(df, FILES["expenses"])
                 st.success("Expense added ✅")
-                st.experimental_rerun()
+                st.rerun()
 
     st.markdown("---")
     st.subheader("Your Expenses")
@@ -370,7 +362,6 @@ def transactions_page():
     if df_user.empty:
         st.info("No transactions yet")
     else:
-        # filters
         colA, colB = st.columns([2,1])
         with colA:
             search = st.text_input("Search by Customer/Agent", key="txn_search")
@@ -383,7 +374,6 @@ def transactions_page():
             df_view = df_view[df_view["status"] == filter_status]
         st.dataframe(df_view, use_container_width=True)
 
-        # select id to edit/delete
         ids = df_view["id"].tolist()
         if ids:
             sel_id = int(st.selectbox("Select Transaction ID to Edit/Delete", ids, key="txn_sel_id"))
@@ -424,7 +414,6 @@ def transactions_page():
                     st.success("Transaction deleted ✅")
                     st.rerun()
 
-        # export current view
         if not df_view.empty:
             st.download_button("⬇️ Download Transactions CSV (view)", df_to_csv_bytes(df_view), f"transactions_view_{user}.csv", key=f"dl_txn_view_{user}_csv")
             st.download_button("⬇️ Download Transactions Excel (view)", df_to_excel_bytes(df_view, "Transactions"), f"transactions_view_{user}.xlsx", key=f"dl_txn_view_{user}_xlsx")
@@ -617,13 +606,11 @@ def reports_page():
     st.subheader("Expense Details")
     st.dataframe(exp_f, use_container_width=True)
 
-    # Charts: service-wise profit
     if not svc_f.empty:
         grp = svc_f.groupby("service_type").agg({"num_apps":"sum","govt_amt":"sum","paid_amt":"sum","profit_amt":"sum"}).reset_index()
         st.subheader("Service-wise Profit")
         st.bar_chart(grp.set_index("service_type")["profit_amt"])
 
-    # Monthly trend Profit vs Expenses
     if not svc_f.empty or not exp_f.empty:
         if not svc_f.empty:
             tmp_s = svc_f.copy()
@@ -643,7 +630,6 @@ def reports_page():
             st.subheader("Monthly Profit vs Expenses")
             st.line_chart(merged.set_index("Month")[["Profit","Expenses"]])
 
-    # exports
     if not svc_f.empty:
         st.download_button("⬇️ Download Services Report CSV", df_to_csv_bytes(svc_f), f"services_report_{user}.csv", key=f"dl_rep_svc_{user}_csv")
         st.download_button("⬇️ Download Services Report Excel", df_to_excel_bytes(svc_f, "ServicesReport"), f"services_report_{user}.xlsx", key=f"dl_rep_svc_{user}_xlsx")
