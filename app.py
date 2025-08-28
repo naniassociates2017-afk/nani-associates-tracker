@@ -2,7 +2,7 @@
 import streamlit as st
 import pandas as pd
 import os
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from io import BytesIO
 
 # -------------------------
@@ -57,14 +57,9 @@ def ensure_datafiles_exist():
     exp_cols = ["id","date","user","category","amount","notes"]
     txn_cols = ["id","date","user","party","service_type","status","amount","notes"]
     sup_cols = ["id","date","user","supplier_name","service_type","paid_amt","pending_amt","partial_amt","notes"]
-    if not os.path.exists(FILES["services"]):
-        save_csv(pd.DataFrame(columns=svc_cols), FILES["services"])
-    if not os.path.exists(FILES["expenses"]):
-        save_csv(pd.DataFrame(columns=exp_cols), FILES["expenses"])
-    if not os.path.exists(FILES["transactions"]):
-        save_csv(pd.DataFrame(columns=txn_cols), FILES["transactions"])
-    if not os.path.exists(FILES["suppliers"]):
-        save_csv(pd.DataFrame(columns=sup_cols), FILES["suppliers"])
+    for key, cols in zip(FILES.keys(), [svc_cols, exp_cols, txn_cols, sup_cols]):
+        if not os.path.exists(FILES[key]):
+            save_csv(pd.DataFrame(columns=cols), FILES[key])
 
 def next_id(df):
     if df.empty:
@@ -95,6 +90,8 @@ if "user" not in st.session_state:
     st.session_state.user = None
 if "device" not in st.session_state:
     st.session_state.device = None
+if "login_attempted" not in st.session_state:
+    st.session_state.login_attempted = False
 
 ensure_datafiles_exist()
 
@@ -118,16 +115,15 @@ def login_page():
             if username in USER_CREDENTIALS and USER_CREDENTIALS[username]==password:
                 st.session_state.user = username
                 st.session_state.device = "mobile" if username=="mobile" else "desktop"
-                st.success(f"Welcome {username} 👋")
-                st.experimental_rerun()
+                st.session_state.login_attempted = True
             else:
                 st.error("Invalid username or password")
 
 def logout():
     st.session_state.user = None
     st.session_state.device = None
+    st.session_state.login_attempted = False
     st.success("Logged out")
-    st.experimental_rerun()
 
 # -------------------------
 # SERVICE ENTRY
@@ -171,7 +167,7 @@ def service_entry_page():
                 df = pd.concat([df,pd.DataFrame([new_row])], ignore_index=True)
                 save_csv(df, FILES["services"])
                 st.success("Service added ✅")
-                st.experimental_rerun()
+                st.session_state.login_attempted = True  # trigger page reload
 
     st.markdown("---")
     st.subheader("Your Services")
@@ -205,7 +201,7 @@ def expense_entry_page():
                 }])], ignore_index=True)
                 save_csv(df, FILES["expenses"])
                 st.success("Expense added ✅")
-                st.experimental_rerun()
+                st.session_state.login_attempted = True
 
     st.markdown("---")
     st.subheader("Your Expenses")
@@ -242,7 +238,7 @@ def transactions_page():
                 }])], ignore_index=True)
                 save_csv(df, FILES["transactions"])
                 st.success("Transaction added ✅")
-                st.experimental_rerun()
+                st.session_state.login_attempted = True
 
     st.markdown("---")
     st.subheader("Your Transactions")
@@ -284,7 +280,7 @@ def suppliers_page():
                 }])], ignore_index=True)
                 save_csv(df, FILES["suppliers"])
                 st.success("Supplier payment added ✅")
-                st.experimental_rerun()
+                st.session_state.login_attempted = True
 
     st.markdown("---")
     st.subheader("Supplier Payments")
@@ -341,15 +337,18 @@ def reports_page():
 # -------------------------
 def main():
     st.set_page_config(page_title="NANI ASSOCIATES - Tracker", layout="wide")
+
     if st.session_state.user is None:
         login_page()
+        if st.session_state.login_attempted:
+            st.experimental_rerun()
         return
 
     st.sidebar.title("📊 NANI ASSOCIATES")
     st.sidebar.write(f"Logged in as: **{st.session_state.user}** ({st.session_state.device})")
     if st.sidebar.button("Logout"):
         logout()
-        return
+        st.experimental_rerun()
 
     page = st.sidebar.radio("Menu", [
         "Service Entry",
