@@ -693,7 +693,7 @@ if not today_df.empty:
     )
     if st.button("Delete Entry", key="delete_button"):
         row_to_delete = today_df.index[
-            (today_df["time"] + " | " + today_df["name"] + " |
+        
 
 
 
