@@ -147,3 +147,77 @@ elif choice == "Daily Data Logger":
         )
     else:
         st.write("No data available to export.")
+        elif menu == "Reports":
+    st.header("📊 Reports")
+
+    st.subheader("Filter Transactions")
+
+    # Date filter
+    start_date = st.date_input("Start Date")
+    end_date = st.date_input("End Date")
+
+    # Agent filter
+    agent = st.text_input("Agent Name (optional)")
+
+    if st.button("View Report"):
+        all_files = sorted([f for f in os.listdir("transactions") if f.endswith(".csv")])
+        if not all_files:
+            st.warning("No transactions found yet.")
+        else:
+            import pandas as pd
+            df_list = [pd.read_csv(os.path.join("transactions", f)) for f in all_files]
+            df = pd.concat(df_list, ignore_index=True)
+
+            # Convert date column if present
+            if "Date" in df.columns:
+                df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+
+            # Apply filters
+            if start_date:
+                df = df[df["Date"] >= pd.to_datetime(start_date)]
+            if end_date:
+                df = df[df["Date"] <= pd.to_datetime(end_date)]
+            if agent:
+                df = df[df["Agent"].str.contains(agent, case=False, na=False)]
+
+            if df.empty:
+                st.warning("No records match your filters.")
+            else:
+                st.success(f"Found {len(df)} records.")
+                st.dataframe(df)
+
+                # Charts
+                st.subheader("📈 Charts")
+                if "Amount" in df.columns and "Agent" in df.columns:
+                    chart_data = df.groupby("Agent")["Amount"].sum().reset_index()
+                    st.bar_chart(chart_data.set_index("Agent"))
+
+                # Download options
+                st.subheader("⬇️ Download")
+                csv = df.to_csv(index=False).encode("utf-8")
+                st.download_button("Download CSV", csv, "report.csv", "text/csv")
+
+                # Excel
+                from io import BytesIO
+                import pandas as pd
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                    df.to_excel(writer, index=False, sheet_name="Report")
+                excel_data = output.getvalue()
+                st.download_button("Download Excel", excel_data, "report.xlsx")
+
+                # PDF (simple text export)
+                from reportlab.lib.pagesizes import letter
+                from reportlab.pdfgen import canvas
+
+                pdf_file = BytesIO()
+                c = canvas.Canvas(pdf_file, pagesize=letter)
+                text = c.beginText(50, 750)
+                text.setFont("Helvetica", 10)
+                for row in df.to_string(index=False).split("\n"):
+                    text.textLine(row)
+                c.drawText(text)
+                c.showPage()
+                c.save()
+                st.download_button("Download PDF", pdf_file.getvalue(), "report.pdf")
+
