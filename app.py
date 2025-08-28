@@ -506,7 +506,6 @@ def save_data(entry):
     df.to_csv(get_today_file(), index=False)
 
 # Function to export all data as a DataFrame (today first)
-def export_all_data()
 import streamlit as st
 import pandas as pd
 import os
