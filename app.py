@@ -147,7 +147,8 @@ elif choice == "Daily Data Logger":
         )
     else:
         st.write("No data available to export.")
-        elif menu == "Reports":
+      
+    elif menu == "Reports":
     st.header("📊 Reports")
 
     st.subheader("Filter Transactions")
