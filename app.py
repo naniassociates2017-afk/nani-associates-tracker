@@ -4,7 +4,6 @@ import pandas as pd
 import os
 from datetime import date, datetime, timedelta
 from io import BytesIO
-import matplotlib.pyplot as plt
 
 # -------------------------
 # Config / Credentials
@@ -320,11 +319,7 @@ def reports_page():
 
     st.subheader("Product-wise Chart")
     if not svc_summary.empty:
-        fig, ax = plt.subplots()
-        ax.bar(svc_summary["service_type"], svc_summary["num_apps"])
-        ax.set_ylabel("No. of Applications")
-        ax.set_xticklabels(svc_summary["service_type"], rotation=45, ha="right")
-        st.pyplot(fig)
+        st.bar_chart(svc_summary.set_index("service_type")["num_apps"])
 
     st.subheader(f"Profit & Loss ({period})")
     total_income = df_svc_period["paid_amt"].sum()
