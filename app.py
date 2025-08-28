@@ -314,6 +314,83 @@ if st.button("Save Entry"):
 # Show today's data
 st.subheader("Today's Entries")
 st.dataframe(load_data())
+import streamlit as st
+import pandas as pd
+import os
+from datetime import datetime
+
+# Create a data folder if it doesn't exist
+DATA_FOLDER = "data"
+if not os.path.exists(DATA_FOLDER):
+    os.makedirs(DATA_FOLDER)
+
+# Function to get today's file path
+def get_today_file():
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    return os.path.join(DATA_FOLDER, f"data_{today_str}.csv")
+
+# Function to load data from a specific file
+def load_data(file_path):
+    if os.path.exists(file_path):
+        return pd.read_csv(file_path)
+    else:
+        return pd.DataFrame(columns=["time", "name", "amount"])
+
+# Function to save new entry
+def save_data(entry):
+    df = load_data(get_today_file())
+    df = pd.concat([df, pd.DataFrame([entry])], ignore_index=True)
+    df.to_csv(get_today_file(), index=False)
+
+# Function to export all data
+def export_all_data():
+    all_files = sorted([f for f in os.listdir(DATA_FOLDER) if f.startswith("data_") and f.endswith(".csv")])
+    combined_df = pd.DataFrame(columns=["time", "name", "amount"])
+    for file in all_files:
+        df = load_data(os.path.join(DATA_FOLDER, file))
+        df["date"] = file.replace("data_", "").replace(".csv", "")
+        combined_df = pd.concat([combined_df, df], ignore_index=True)
+    return combined_df
+
+# --- Streamlit Interface ---
+st.title("Daily Data Logger")
+
+# Input for new entry
+st.subheader("Add New Entry")
+name = st.text_input("Enter Name", key="name_input")
+amount = st.number_input("Enter Amount", min_value=0, key="amount_input")
+
+if st.button("Save Entry", key="save_entry_button"):
+    entry = {
+        "time": datetime.now().strftime("%H:%M:%S"),
+        "name": name,
+        "amount": amount
+    }
+    save_data(entry)
+    st.success("Entry saved!")
+
+# Show today's data
+st.subheader("Today's Entries")
+st.dataframe(load_data(get_today_file()), use_container_width=True)
+
+# Dropdown to view previous days
+st.subheader("View Previous Days")
+all_files = sorted([f for f in os.listdir(DATA_FOLDER) if f.startswith("data_") and f.endswith(".csv")], reverse=True)
+
+if all_files:
+    selected_file = st.selectbox("Select Date", all_files, key="select_date_dropdown")
+    st.dataframe(load_data(os.path.join(DATA_FOLDER, selected_file)), use_container_width=True)
+else:
+    st.write("No data files found.")
+
+# Export all data
+st.subheader("Export All Data")
+if st.button("Download All Data as CSV", key="export_button"):
+    combined_df = export_all_data()
+    export_path = os.path.join(DATA_FOLDER, "all_data_combined.csv")
+    combined_df.to_csv(export_path, index=False)
+    st.success(f"All data exported to '{export_path}'")
+
 
 
 
