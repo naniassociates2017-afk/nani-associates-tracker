@@ -1,4 +1,4 @@
-# app.py
+# appy.py
 import streamlit as st
 import pandas as pd
 import os
@@ -167,7 +167,7 @@ def service_entry_page():
                 df = pd.concat([df,pd.DataFrame([new_row])], ignore_index=True)
                 save_csv(df, FILES["services"])
                 st.success("Service added ✅")
-                st.session_state.login_attempted = True  # trigger page reload
+                st.session_state.login_attempted = True
 
     st.markdown("---")
     st.subheader("Your Services")
@@ -244,6 +244,11 @@ def transactions_page():
     st.subheader("Your Transactions")
     df_user = df[df["user"]==user].sort_values("date", ascending=False)
     st.dataframe(df_user, use_container_width=True)
+    # ----------------- Separate Totals -----------------
+    paid_sum = df_user[df_user["status"]=="Paid"]["amount"].sum()
+    pending_sum = df_user[df_user["status"]=="Pending"]["amount"].sum()
+    partial_sum = df_user[df_user["status"]=="Partial"]["amount"].sum()
+    st.info(f"Total Paid: ₹{paid_sum} | Pending: ₹{pending_sum} | Partial: ₹{partial_sum}")
     st.download_button("⬇️ Download Transactions CSV", df_to_csv_bytes(df_user), f"transactions_{user}.csv")
     st.download_button("⬇️ Download Transactions Excel", df_to_excel_bytes(df_user,"Transactions"), f"transactions_{user}.xlsx")
 
@@ -286,6 +291,10 @@ def suppliers_page():
     st.subheader("Supplier Payments")
     df_user = df[df["user"]==user].sort_values("date", ascending=False)
     st.dataframe(df_user, use_container_width=True)
+    paid_sum = df_user["paid_amt"].sum()
+    pending_sum = df_user["pending_amt"].sum()
+    partial_sum = df_user["partial_amt"].sum()
+    st.info(f"Total Paid: ₹{paid_sum} | Pending: ₹{pending_sum} | Partial: ₹{partial_sum}")
     st.download_button("⬇️ Download Suppliers CSV", df_to_csv_bytes(df_user), f"suppliers_{user}.csv")
     st.download_button("⬇️ Download Suppliers Excel", df_to_excel_bytes(df_user,"Suppliers"), f"suppliers_{user}.xlsx")
 
@@ -306,30 +315,40 @@ def reports_page():
     df_sup = load_csv(FILES["suppliers"], sup_cols)
 
     period = st.selectbox("Select Period", ["Daily","Weekly","Monthly"])
-    st.subheader(f"Service Summary ({period})")
     df_svc_period = filter_date(df_svc, period=period)
+    df_exp_period = filter_date(df_exp, period=period)
+    df_txn_period = filter_date(df_txn, period=period)
+    df_sup_period = filter_date(df_sup, period=period)
+
+    st.subheader(f"Service Summary ({period})")
     svc_summary = df_svc_period.groupby("service_type").agg({
         "num_apps":"sum","govt_amt":"sum","paid_amt":"sum","profit_amt":"sum"
     }).reset_index()
     st.dataframe(svc_summary, use_container_width=True)
-
-    st.subheader("Product-wise Chart")
     if not svc_summary.empty:
         st.bar_chart(svc_summary.set_index("service_type")["num_apps"])
+
+    st.subheader("Transactions Status Summary")
+    paid = df_txn_period[df_txn_period["status"]=="Paid"]["amount"].sum()
+    pending = df_txn_period[df_txn_period["status"]=="Pending"]["amount"].sum()
+    partial = df_txn_period[df_txn_period["status"]=="Partial"]["amount"].sum()
+    st.info(f"Paid: ₹{paid} | Pending: ₹{pending} | Partial: ₹{partial}")
+
+    st.subheader("Supplier Status Summary")
+    sup_paid = df_sup_period["paid_amt"].sum()
+    sup_pending = df_sup_period["pending_amt"].sum()
+    sup_partial = df_sup_period["partial_amt"].sum()
+    st.info(f"Paid: ₹{sup_paid} | Pending: ₹{sup_pending} | Partial: ₹{sup_partial}")
 
     st.subheader(f"Profit & Loss ({period})")
     total_income = df_svc_period["paid_amt"].sum()
     total_profit = df_svc_period["profit_amt"].sum()
-    df_exp_period = filter_date(df_exp, period=period)
     total_expenses = df_exp_period["amount"].sum()
-    df_sup_period = filter_date(df_sup, period=period)
-    supplier_paid = df_sup_period["paid_amt"].sum()
-    net_profit = total_profit - total_expenses - supplier_paid
-
+    net_profit = total_profit - total_expenses - sup_paid
     st.write(f"**Total Income:** ₹{total_income}")
     st.write(f"**Total Profit (from services):** ₹{total_profit}")
     st.write(f"**Total Expenses:** ₹{total_expenses}")
-    st.write(f"**Supplier Payments:** ₹{supplier_paid}")
+    st.write(f"**Supplier Paid:** ₹{sup_paid}")
     st.write(f"**Net Profit:** ₹{net_profit}")
 
 # -------------------------
@@ -337,7 +356,6 @@ def reports_page():
 # -------------------------
 def main():
     st.set_page_config(page_title="NANI ASSOCIATES - Tracker", layout="wide")
-
     if st.session_state.user is None:
         login_page()
         if st.session_state.login_attempted:
