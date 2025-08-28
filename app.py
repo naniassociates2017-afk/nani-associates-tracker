@@ -721,7 +721,7 @@ st.sidebar.write(f"Logged in as admin")
 # Adding entries, deleting entries, viewing previous days, export, etc.
 # -----------------------------
 
-        import streamlit as st
+import streamlit as st
 import pandas as pd
 import os
 from datetime import datetime
