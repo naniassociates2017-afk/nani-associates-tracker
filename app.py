@@ -1,62 +1,179 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 
-# ---------------------------
-# LOGIN SYSTEM
-# ---------------------------
-USER_CREDENTIALS = {"admin": "admin123"}
-
+# ======================
+# INITIALIZATION
+# ======================
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
-if "username" not in st.session_state:
-    st.session_state.username = ""
 
-def login():
+if "services" not in st.session_state:
+    st.session_state.services = pd.DataFrame(
+        columns=["Date", "Service", "Govt Amt", "Paid Amt", "Profit Amt"]
+    )
+
+if "expenses" not in st.session_state:
+    st.session_state.expenses = pd.DataFrame(
+        columns=["Date", "Expense Name", "Amount"]
+    )
+
+# ======================
+# LOGIN PAGE
+# ======================
+def login_page():
     st.title("🔐 Login")
     username = st.text_input("Username")
     password = st.text_input("Password", type="password")
+
     if st.button("Login"):
-        if username in USER_CREDENTIALS and USER_CREDENTIALS[username] == password:
+        if username == "admin" and password == "admin123":  # Change if needed
             st.session_state.logged_in = True
-            st.session_state.username = username
             st.success("✅ Logged in successfully")
+            st.rerun()
         else:
             st.error("❌ Invalid username or password")
 
-def logout():
-    st.session_state.logged_in = False
-    st.session_state.username = ""
+# ======================
+# SERVICE ENTRY
+# ======================
+def service_entry():
+    st.header("📝 Service Entry")
 
-# ---------------------------
-# DATA STORAGE
-# ---------------------------
-if "services" not in st.session_state:
-    st.session_state.services = []
+    service_list = [
+        "NEW PAN CARD",
+        "CORRECTION PAN CARD",
+        "NEW PASSPORT",
+        "RENEWAL PASSPORT",
+        "DIGITAL SIGNATURE",
+        "VOTER ID",
+        "NEW AADHAR CARD",
+        "NAME CHANGE AADHAR CARD",
+        "ADDRESS CHANGE IN AADHAR CARD",
+        "DATE OF BIRTH CHANGE IN AADHAR CARD",
+        "AADHAR CARD PRINT",
+        "OTHER ONLINE SERVICES"
+    ]
 
-if "expenses" not in st.session_state:
-    st.session_state.expenses = []
+    service = st.selectbox("Select Service", service_list)
+    govt_amt = st.number_input("Government Amount", min_value=0.0, step=1.0)
+    paid_amt = st.number_input("Customer Paid Amount", min_value=0.0, step=1.0)
+    profit_amt = paid_amt - govt_amt
 
-if "transactions" not in st.session_state:
-    st.session_state.transactions = []
+    st.write(f"💰 Profit: **{profit_amt}**")
 
-if "suppliers" not in st.session_state:
-    st.session_state.suppliers = []
+    if st.button("Save Service Entry"):
+        new_entry = {
+            "Date": datetime.today().strftime("%Y-%m-%d"),
+            "Service": service,
+            "Govt Amt": govt_amt,
+            "Paid Amt": paid_amt,
+            "Profit Amt": profit_amt,
+        }
+        st.session_state.services = pd.concat(
+            [st.session_state.services, pd.DataFrame([new_entry])],
+            ignore_index=True,
+        )
+        st.success("✅ Service entry saved successfully!")
 
-if "balances" not in st.session_state:
-    st.session_state.balances = {"opening": 0, "closing": 0, "cash_in_hand": 0, "cash_at_bank": 0}
+    st.subheader("📋 Saved Services")
+    st.dataframe(st.session_state.services)
 
-# ---------------------------
-# APP MAIN MENU
-# ---------------------------
-def app():
+# ======================
+# EXPENSE ENTRY
+# ======================
+def expense_entry():
+    st.header("💰 Expense Entry")
+
+    expense_name = st.text_input("Expense Name")
+    expense_amt = st.number_input("Expense Amount", min_value=0.0, step=1.0)
+
+    if st.button("Save Expense"):
+        new_expense = {
+            "Date": datetime.today().strftime("%Y-%m-%d"),
+            "Expense Name": expense_name,
+            "Amount": expense_amt,
+        }
+        st.session_state.expenses = pd.concat(
+            [st.session_state.expenses, pd.DataFrame([new_expense])],
+            ignore_index=True,
+        )
+        st.success("✅ Expense saved successfully!")
+
+    st.subheader("📋 Saved Expenses")
+    st.dataframe(st.session_state.expenses)
+
+# ======================
+# REPORTS
+# ======================
+def reports():
+    st.header("📊 Reports")
+
+    st.subheader("Services Summary")
+    st.dataframe(st.session_state.services)
+
+    st.subheader("Expenses Summary")
+    st.dataframe(st.session_state.expenses)
+
+    st.info("📅 You can extend this to show Daily / Weekly / Monthly summaries.")
+
+# ======================
+# DAILY DATA LOGGER
+# ======================
+def daily_data_logger():
+    st.header("📅 Daily Data Logger")
+    st.info("👉 This section will keep logs of all daily activities.")
+
+# ======================
+# AGENT/CUSTOMER TRANSACTIONS
+# ======================
+def agent_customer_transactions():
+    st.header("👥 Agent/Customer Transactions")
+    st.info("👉 Here you can manage Paid, Pending, Partial transactions.")
+
+# ======================
+# SUPPLIERS
+# ======================
+def suppliers():
+    st.header("📦 Suppliers")
+    st.info("👉 Manage suppliers, received services, balance amounts here.")
+
+# ======================
+# BALANCES
+# ======================
+def balances():
+    st.header("💵 Balances")
+
+    total_paid = st.session_state.services["Paid Amt"].sum()
+    total_govt = st.session_state.services["Govt Amt"].sum()
+    total_profit = st.session_state.services["Profit Amt"].sum()
+    total_expenses = st.session_state.expenses["Amount"].sum()
+
+    cash_in_hand = total_profit - total_expenses
+
+    st.metric("Total Customer Paid", f"₹ {total_paid}")
+    st.metric("Total Government Amount", f"₹ {total_govt}")
+    st.metric("Total Profit", f"₹ {total_profit}")
+    st.metric("Total Expenses", f"₹ {total_expenses}")
+    st.metric("Cash in Hand", f"₹ {cash_in_hand}")
+
+# ======================
+# MAIN APP
+# ======================
+def main_app():
     st.sidebar.title("📌 Menu")
-    menu = st.sidebar.radio("Navigate", 
-                            ["Service Entry", "Expense Entry", "Reports", 
-                             "Daily Data Logger", "Agents/Customers", "Suppliers", 
-                             "Balances"])
-
-    st.sidebar.button("Logout", on_click=logout)
+    menu = st.sidebar.radio(
+        "Select an option",
+        [
+            "Service Entry",
+            "Expense Entry",
+            "Reports",
+            "Daily Data Logger",
+            "Agent/Customer Transactions",
+            "Suppliers",
+            "Balances",
+        ],
+    )
 
     if menu == "Service Entry":
         service_entry()
@@ -65,164 +182,26 @@ def app():
     elif menu == "Reports":
         reports()
     elif menu == "Daily Data Logger":
-        daily_data()
-    elif menu == "Agents/Customers":
-        agents_customers()
+        daily_data_logger()
+    elif menu == "Agent/Customer Transactions":
+        agent_customer_transactions()
     elif menu == "Suppliers":
         suppliers()
     elif menu == "Balances":
         balances()
 
-# ---------------------------
-# SERVICE ENTRY
-# ---------------------------
-def service_entry():
-    st.header("📝 Service Entry")
+    if st.sidebar.button("🚪 Logout"):
+        st.session_state.logged_in = False
+        st.rerun()
 
-    services_list = [
-        "NEW PAN CARD", "CORRECTION PAN CARD", "NEW PASSPORT", "RENEWAL PASSPORT",
-        "DIGITAL SIGNATURE", "VOTER ID", "NEW AADHAR CARD", "NAME CHANGE AADHAR CARD",
-        "ADDRESS CHANGE IN AADHAR CARD", "DATE OF BIRTH CHANGE IN AADHAR CARD",
-        "AADHAR CARD PRINT", "OTHER ONLINE SERVICES"
-    ]
-
-    service_type = st.selectbox("Select Service", services_list)
-    govt_amount = st.number_input("Government Amount (₹)", min_value=0)
-    paid_amount = st.number_input("Paid by Customer (₹)", min_value=0)
-    profit = paid_amount - govt_amount
-    st.write(f"💰 Profit: ₹{profit}")
-
-    customer_name = st.text_input("Customer / Agent Name")
-    status = st.selectbox("Payment Status", ["Paid", "Pending", "Partial"])
-
-    if st.button("Add Service Entry"):
-        entry = {
-            "date": datetime.now().strftime("%Y-%m-%d"),
-            "service": service_type,
-            "govt_amount": govt_amount,
-            "paid_amount": paid_amount,
-            "profit": profit,
-            "customer": customer_name,
-            "status": status
-        }
-        st.session_state.services.append(entry)
-        st.success("✅ Service Entry Added!")
-
-    if st.session_state.services:
-        df = pd.DataFrame(st.session_state.services)
-        st.subheader("📊 Service Records")
-        st.dataframe(df)
-
-# ---------------------------
-# EXPENSE ENTRY
-# ---------------------------
-def expense_entry():
-    st.header("💸 Expense Entry")
-    exp_name = st.text_input("Expense Name")
-    exp_amount = st.number_input("Expense Amount (₹)", min_value=0)
-    if st.button("Add Expense"):
-        entry = {"date": datetime.now().strftime("%Y-%m-%d"), "expense": exp_name, "amount": exp_amount}
-        st.session_state.expenses.append(entry)
-        st.success("✅ Expense Added!")
-
-    if st.session_state.expenses:
-        df = pd.DataFrame(st.session_state.expenses)
-        st.subheader("📊 Expenses Records")
-        st.dataframe(df)
-
-# ---------------------------
-# REPORTS
-# ---------------------------
-def reports():
-    st.header("📈 Reports")
-    period = st.selectbox("Select Report Period", ["Daily", "Weekly", "Monthly", "All Time"])
-    today = datetime.now().date()
-
-    if st.session_state.services:
-        df = pd.DataFrame(st.session_state.services)
-        df["date"] = pd.to_datetime(df["date"])
-
-        if period == "Daily":
-            df = df[df["date"].dt.date == today]
-        elif period == "Weekly":
-            df = df[df["date"].dt.date >= today - timedelta(days=7)]
-        elif period == "Monthly":
-            df = df[df["date"].dt.date >= today - timedelta(days=30)]
-
-        st.subheader("🧾 Service Report")
-        st.dataframe(df)
-
-        st.write(f"Total Revenue: ₹{df['paid_amount'].sum()}")
-        st.write(f"Total Government Amount: ₹{df['govt_amount'].sum()}")
-        st.write(f"Total Profit: ₹{df['profit'].sum()}")
-
-# ---------------------------
-# DAILY DATA LOGGER
-# ---------------------------
-def daily_data():
-    st.header("📅 Daily Data Logger")
-    if st.session_state.services:
-        df = pd.DataFrame(st.session_state.services)
-        df["date"] = pd.to_datetime(df["date"])
-        daily = df.groupby(df["date"].dt.date).sum(numeric_only=True)
-        st.dataframe(daily)
-
-# ---------------------------
-# AGENTS / CUSTOMERS
-# ---------------------------
-def agents_customers():
-    st.header("🤝 Agents / Customers Transactions")
-    name = st.text_input("Agent / Customer Name")
-    amount = st.number_input("Transaction Amount", min_value=0)
-    status = st.selectbox("Status", ["Paid", "Pending", "Partial"])
-
-    if st.button("Add Transaction"):
-        st.session_state.transactions.append({"name": name, "amount": amount, "status": status})
-        st.success("✅ Transaction Added!")
-
-    if st.session_state.transactions:
-        df = pd.DataFrame(st.session_state.transactions)
-        st.subheader("📊 Transaction Records")
-        st.dataframe(df)
-
-# ---------------------------
-# SUPPLIERS
-# ---------------------------
-def suppliers():
-    st.header("🏭 Suppliers")
-    supplier_name = st.text_input("Supplier Name")
-    service_received = st.text_input("Service Received")
-    balance = st.number_input("Balance Amount", min_value=0)
-
-    if st.button("Add Supplier Record"):
-        st.session_state.suppliers.append({"supplier": supplier_name, "service": service_received, "balance": balance})
-        st.success("✅ Supplier Record Added!")
-
-    if st.session_state.suppliers:
-        df = pd.DataFrame(st.session_state.suppliers)
-        st.subheader("📊 Supplier Records")
-        st.dataframe(df)
-
-# ---------------------------
-# BALANCES
-# ---------------------------
-def balances():
-    st.header("💵 Balances")
-    opening = st.number_input("Opening Balance", min_value=0, value=st.session_state.balances["opening"])
-    closing = st.number_input("Closing Balance", min_value=0, value=st.session_state.balances["closing"])
-    cash_hand = st.number_input("Cash in Hand", min_value=0, value=st.session_state.balances["cash_in_hand"])
-    cash_bank = st.number_input("Cash at Bank", min_value=0, value=st.session_state.balances["cash_at_bank"])
-
-    if st.button("Update Balances"):
-        st.session_state.balances = {"opening": opening, "closing": closing, "cash_in_hand": cash_hand, "cash_at_bank": cash_bank}
-        st.success("✅ Balances Updated!")
-
-    st.write(st.session_state.balances)
-
-# ---------------------------
+# ======================
 # RUN APP
-# ---------------------------
-if not st.session_state.logged_in:
-    login()
-else:
-    app()
+# ======================
+def main():
+    if not st.session_state.logged_in:
+        login_page()
+    else:
+        main_app()
+
+if __name__ == "__main__":
+    main()
