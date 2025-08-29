@@ -131,7 +131,7 @@ def logout():
     st.success("Logged out")
 
 # -------------------------
-# Entry Pages
+# Service Entry
 # -------------------------
 def service_entry_page():
     st.header("📝 Service Entry")
@@ -176,16 +176,9 @@ def service_entry_page():
     st.download_button("⬇️ Download Services CSV", df_user.to_csv(index=False).encode(), f"services_{user}.csv")
     st.download_button("⬇️ Download Services Excel", df_to_excel_bytes(df_user,"Services"), f"services_{user}.xlsx")
 
-    st.markdown("### 🔍 Customer / Agent History")
-    customer_select = st.selectbox("Select Customer / Agent", customers)
-    start_date = st.date_input("Start Date", value=date.today()-timedelta(days=30), key="svc_start")
-    end_date = st.date_input("End Date", value=date.today(), key="svc_end")
-    if customer_select:
-        df_history = df[(df["customer"]==customer_select) & (pd.to_datetime(df["date"]).dt.date>=start_date) & (pd.to_datetime(df["date"]).dt.date<=end_date)]
-        st.dataframe(df_history.style.applymap(color_status, subset=["status"]))
-        st.download_button("⬇️ Download Customer History CSV", df_history.to_csv(index=False).encode(), f"{customer_select}_history.csv")
-        st.download_button("⬇️ Download Customer History Excel", df_to_excel_bytes(df_history,f"{customer_select}_history"), f"{customer_select}_history.xlsx")
-
+# -------------------------
+# Expenses Entry
+# -------------------------
 def expenses_entry_page():
     st.header("💵 Expenses Entry")
     user = st.session_state.user
@@ -217,6 +210,9 @@ def expenses_entry_page():
     st.download_button("⬇️ Download Expenses CSV", df_user.to_csv(index=False).encode(), f"expenses_{user}.csv")
     st.download_button("⬇️ Download Expenses Excel", df_to_excel_bytes(df_user,"Expenses"), f"expenses_{user}.xlsx")
 
+# -------------------------
+# Transactions Entry
+# -------------------------
 def transactions_entry_page():
     st.header("💳 Transactions Entry")
     user = st.session_state.user
@@ -252,6 +248,9 @@ def transactions_entry_page():
     st.download_button("⬇️ Download Transactions CSV", df_user.to_csv(index=False).encode(), f"transactions_{user}.csv")
     st.download_button("⬇️ Download Transactions Excel", df_to_excel_bytes(df_user,"Transactions"), f"transactions_{user}.xlsx")
 
+# -------------------------
+# Suppliers Entry
+# -------------------------
 def suppliers_entry_page():
     st.header("🏢 Suppliers Entry")
     user = st.session_state.user
@@ -259,7 +258,7 @@ def suppliers_entry_page():
     df = load_csv(FILES["suppliers"], sup_cols)
     suppliers = df["supplier_name"].dropna().unique().tolist()
 
-    # Supplier Entry Form
+    # Form
     with st.form("sup_add_form", clear_on_submit=True):
         entry_date = st.date_input("Date", value=date.today())
         supplier = st.text_input("Supplier Name")
@@ -281,7 +280,7 @@ def suppliers_entry_page():
                 save_csv(df, FILES["suppliers"])
                 st.success("Supplier entry added ✅")
 
-    # Display Supplier Summary
+    # Summary
     st.markdown("---")
     st.subheader("Suppliers Summary")
     if suppliers:
@@ -367,4 +366,12 @@ def main():
         service_entry_page()
     elif page=="Expenses Entry":
         expenses_entry_page()
-    elif page=="Transactions Entry
+    elif page=="Transactions Entry":
+        transactions_entry_page()
+    elif page=="Suppliers Entry":
+        suppliers_entry_page()
+    elif page=="Backup Data":
+        backup_page()
+
+if __name__=="__main__":
+    main()
