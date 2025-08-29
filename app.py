@@ -56,7 +56,7 @@ def load_csv(file_path, columns):
             df = pd.read_csv(file_path)
             for c in columns:
                 if c not in df.columns:
-                    df[c] = ""
+                    df[c] = 0.0 if 'amt' in c.lower() or 'cash' in c.lower() else ""
             return df[columns]
         except Exception:
             return pd.DataFrame(columns=columns)
@@ -97,6 +97,12 @@ def color_status(val):
     elif val=="Partial":
         return 'background-color: orange'
     return ''
+
+def format_amounts(df, cols):
+    for c in cols:
+        if c in df.columns:
+            df[c] = df[c].apply(lambda x: round(float(x),2))
+    return df
 
 # -------------------------
 # Session State
@@ -144,6 +150,7 @@ def service_entry_page():
     user = st.session_state.user
     svc_cols = ["id","date","user","customer","service_type","num_apps","govt_amt","paid_amt","profit_amt","status","payment_type","notes"]
     df = load_csv(FILES["services"], svc_cols)
+    df = format_amounts(df, ["govt_amt","paid_amt","profit_amt"])
     customers = df["customer"].dropna().unique().tolist()
 
     st.subheader("➕ Add New Service")
@@ -173,6 +180,7 @@ def service_entry_page():
                            "service_type":service_type,"num_apps":int(num_apps),"govt_amt":total_govt,
                            "paid_amt":total_paid,"profit_amt":profit,"status":status,"payment_type":payment_type,"notes":notes}
                 df = pd.concat([df,pd.DataFrame([new_row])], ignore_index=True)
+                df = format_amounts(df, ["govt_amt","paid_amt","profit_amt"])
                 save_csv(df, FILES["services"])
                 st.success("Service added ✅")
 
@@ -181,16 +189,19 @@ def service_entry_page():
     start_date = st.date_input("Start Date", value=date.today()-timedelta(days=30), key="svc_start")
     end_date = st.date_input("End Date", value=date.today(), key="svc_end")
     df_filtered = filter_date(df, start=start_date, end=end_date)
+    df_filtered = format_amounts(df_filtered, ["govt_amt","paid_amt","profit_amt"])
     st.dataframe(df_filtered.style.applymap(color_status, subset=["status"]))
 
     st.markdown("### 💰 Service Amount Summary")
     summary = df_filtered.groupby("status")[["paid_amt","profit_amt"]].sum().reindex(["Paid","Partial","Pending"], fill_value=0)
+    summary = format_amounts(summary, ["paid_amt","profit_amt"])
     st.dataframe(summary)
 
     st.markdown("### 🔍 Customer / Agent History")
     customer_select = st.selectbox("Select Customer / Agent", customers)
     if customer_select:
         df_history = df_filtered[df_filtered["customer"]==customer_select]
+        df_history = format_amounts(df_history, ["govt_amt","paid_amt","profit_amt"])
         st.dataframe(df_history.style.applymap(color_status, subset=["status"]))
         st.download_button("⬇️ Download Customer History CSV", df_history.to_csv(index=False).encode(), f"{customer_select}_history.csv")
         st.download_button("⬇️ Download Customer History Excel", df_to_excel_bytes(df_history,f"{customer_select}_history"), f"{customer_select}_history.xlsx")
@@ -203,6 +214,7 @@ def expenses_entry_page():
     user = st.session_state.user
     exp_cols = ["id","date","user","category","amount","notes"]
     df = load_csv(FILES["expenses"], exp_cols)
+    df = format_amounts(df, ["amount"])
 
     with st.form("exp_add_form", clear_on_submit=True):
         entry_date = st.date_input("Date", value=date.today())
@@ -215,7 +227,7 @@ def expenses_entry_page():
             else:
                 nid = next_id(df)
                 new_row = {"id":nid,"date":entry_date.strftime("%Y-%m-%d"),"user":user,
-                           "category":category,"amount":amount,"notes":notes}
+                           "category":category,"amount":round(amount,2),"notes":notes}
                 df = pd.concat([df,pd.DataFrame([new_row])], ignore_index=True)
                 save_csv(df, FILES["expenses"])
                 st.success("Expense added ✅")
@@ -225,6 +237,7 @@ def expenses_entry_page():
     start_date = st.date_input("Start Date", value=date.today()-timedelta(days=30), key="exp_start")
     end_date = st.date_input("End Date", value=date.today(), key="exp_end")
     df_user = df[(df["user"]==user) & (pd.to_datetime(df["date"]).dt.date>=start_date) & (pd.to_datetime(df["date"]).dt.date<=end_date)].sort_values("date", ascending=False)
+    df_user = format_amounts(df_user, ["amount"])
     st.dataframe(df_user)
     st.download_button("⬇️ Download Expenses CSV", df_user.to_csv(index=False).encode(), f"expenses_{user}.csv")
     st.download_button("⬇️ Download Expenses Excel", df_to_excel_bytes(df_user,"Expenses"), f"expenses_{user}.xlsx")
@@ -237,6 +250,7 @@ def suppliers_entry_page():
     user = st.session_state.user
     sup_cols = ["id","date","user","supplier_name","service_type","paid_amt","pending_amt","partial_amt","profit_amt","payment_type","notes"]
     df = load_csv(FILES["suppliers"], sup_cols)
+    df = format_amounts(df, ["paid_amt","pending_amt","partial_amt","profit_amt"])
     suppliers = df["supplier_name"].dropna().unique().tolist()
 
     with st.form("sup_add_form", clear_on_submit=True):
@@ -246,7 +260,7 @@ def suppliers_entry_page():
         paid_amt = st.number_input("Paid Amount", min_value=0.0)
         pending_amt = st.number_input("Pending Amount", min_value=0.0)
         partial_amt = st.number_input("Partial Amount", min_value=0.0)
-        profit_amt = paid_amt - (paid_amt + pending_amt + partial_amt) # optional
+        profit_amt = round(paid_amt - (pending_amt + partial_amt),2)
         payment_type = st.selectbox("Payment Type", PAYMENT_TYPES)
         notes = st.text_input("Notes (optional)")
         if st.form_submit_button("➕ Add Supplier Entry"):
@@ -255,8 +269,9 @@ def suppliers_entry_page():
             else:
                 nid = next_id(df)
                 new_row = {"id":nid,"date":entry_date.strftime("%Y-%m-%d"),"user":user,"supplier_name":supplier,"service_type":service_type,
-                           "paid_amt":paid_amt,"pending_amt":pending_amt,"partial_amt":partial_amt,"profit_amt":profit_amt,"payment_type":payment_type,"notes":notes}
+                           "paid_amt":round(paid_amt,2),"pending_amt":round(pending_amt,2),"partial_amt":round(partial_amt,2),"profit_amt":profit_amt,"payment_type":payment_type,"notes":notes}
                 df = pd.concat([df,pd.DataFrame([new_row])], ignore_index=True)
+                df = format_amounts(df, ["paid_amt","pending_amt","partial_amt","profit_amt"])
                 save_csv(df, FILES["suppliers"])
                 st.success("Supplier added ✅")
 
@@ -265,9 +280,11 @@ def suppliers_entry_page():
     start_date = st.date_input("Start Date", value=date.today()-timedelta(days=30), key="sup_start")
     end_date = st.date_input("End Date", value=date.today(), key="sup_end")
     df_filtered = filter_date(df, start=start_date, end=end_date)
+    df_filtered = format_amounts(df_filtered, ["paid_amt","pending_amt","partial_amt","profit_amt"])
     st.dataframe(df_filtered)
     st.markdown("### Supplier Summary")
     summary = df_filtered.groupby("supplier_name")[["paid_amt","pending_amt","partial_amt","profit_amt"]].sum()
+    summary = format_amounts(summary, ["paid_amt","pending_amt","partial_amt","profit_amt"])
     st.dataframe(summary)
 
 # -------------------------
@@ -278,6 +295,7 @@ def cash_entry_page():
     user = st.session_state.user
     cash_cols = ["id","date","user","cash_in_hand","cash_at_bank","notes"]
     df = load_csv(FILES["cash"], cash_cols)
+    df = format_amounts(df, ["cash_in_hand","cash_at_bank"])
 
     with st.form("cash_add_form", clear_on_submit=True):
         entry_date = st.date_input("Date", value=date.today())
@@ -286,8 +304,9 @@ def cash_entry_page():
         notes = st.text_input("Notes (optional)")
         if st.form_submit_button("➕ Add Cash Entry"):
             nid = next_id(df)
-            new_row = {"id":nid,"date":entry_date.strftime("%Y-%m-%d"),"user":user,"cash_in_hand":cash_hand,"cash_at_bank":cash_bank,"notes":notes}
+            new_row = {"id":nid,"date":entry_date.strftime("%Y-%m-%d"),"user":user,"cash_in_hand":round(cash_hand,2),"cash_at_bank":round(cash_bank,2),"notes":notes}
             df = pd.concat([df,pd.DataFrame([new_row])], ignore_index=True)
+            df = format_amounts(df, ["cash_in_hand","cash_at_bank"])
             save_csv(df, FILES["cash"])
             st.success("Cash entry added ✅")
 
@@ -306,9 +325,13 @@ def dashboard_summary():
     user = st.session_state.user
 
     df_svc = load_csv(FILES["services"], ["id","date","user","customer","service_type","num_apps","govt_amt","paid_amt","profit_amt","status","payment_type","notes"])
+    df_svc = format_amounts(df_svc, ["govt_amt","paid_amt","profit_amt"])
     df_sup = load_csv(FILES["suppliers"], ["id","date","user","supplier_name","service_type","paid_amt","pending_amt","partial_amt","profit_amt","payment_type","notes"])
+    df_sup = format_amounts(df_sup, ["paid_amt","pending_amt","partial_amt","profit_amt"])
     df_exp = load_csv(FILES["expenses"], ["id","date","user","category","amount","notes"])
+    df_exp = format_amounts(df_exp, ["amount"])
     df_cash = load_csv(FILES["cash"], ["id","date","user","cash_in_hand","cash_at_bank","notes"])
+    df_cash = format_amounts(df_cash, ["cash_in_hand","cash_at_bank"])
 
     df_svc_user = df_svc[df_svc["user"]==user]
     df_sup_user = df_sup[df_sup["user"]==user]
@@ -332,7 +355,7 @@ def dashboard_summary():
         else:
             st.write("No cash entry for today.")
     else:
-        st.write("No cash records found.")
+        st.write("No cash records available.")
 
 # -------------------------
 # Backup
@@ -363,7 +386,7 @@ def main():
         "Service Entry",
         "Expenses Entry",
         "Suppliers Entry",
-        "Cash In Hand / Bank",
+        "Cash Verification",
         "Backup Data"
     ])
 
@@ -375,7 +398,7 @@ def main():
         expenses_entry_page()
     elif page=="Suppliers Entry":
         suppliers_entry_page()
-    elif page=="Cash In Hand / Bank":
+    elif page=="Cash Verification":
         cash_entry_page()
     elif page=="Backup Data":
         backup_page()
