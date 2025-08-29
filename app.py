@@ -9,14 +9,15 @@ from io import BytesIO
 # Config / Credentials
 # -------------------------
 DATA_FOLDER = "data"
+BACKUP_FOLDER = "backup"
 os.makedirs(DATA_FOLDER, exist_ok=True)
+os.makedirs(BACKUP_FOLDER, exist_ok=True)
 
 FILES = {
     "services": os.path.join(DATA_FOLDER, "services.csv"),
     "expenses": os.path.join(DATA_FOLDER, "expenses.csv"),
     "transactions": os.path.join(DATA_FOLDER, "transactions.csv"),
     "suppliers": os.path.join(DATA_FOLDER, "suppliers.csv"),
-    "customers": os.path.join(DATA_FOLDER, "customers.csv")
 }
 
 USER_CREDENTIALS = {
@@ -27,7 +28,6 @@ USER_CREDENTIALS = {
 }
 
 PAYMENT_TYPES = ["Cash","UPI","Bank Transfer","Cheque","Other"]
-
 DEFAULT_GOVT_AMT = {
     "NEW PAN CARD": 107.0,
     "CORRECTION PAN CARD": 107.0,
@@ -38,7 +38,6 @@ DEFAULT_GOVT_AMT = {
     "NEW AADHAR CARD": 100.0,
     "NAME CHANGE AADHAR CARD": None,
     "DATE OF BIRTH CHANGE IN AADHAR CARD": None,
-    "AADHAR CARD PRINT": None,
     "BIRTH CERTIFICATE": 3000.0,
     "OTHER ONLINE SERVICES": None
 }
@@ -67,13 +66,17 @@ def load_csv(file_path, columns):
 def save_csv(df, file_path):
     df.to_csv(file_path, index=False)
 
+def backup_csv(file_path):
+    if os.path.exists(file_path):
+        fname = os.path.basename(file_path)
+        save_csv(load_csv(file_path, []), os.path.join(BACKUP_FOLDER, f"backup_{fname}"))
+
 def ensure_datafiles_exist():
     svc_cols = ["id","date","user","customer","service_type","num_apps","govt_amt","paid_amt","profit_amt","status","payment_type","notes"]
     exp_cols = ["id","date","user","category","amount","notes"]
     txn_cols = ["id","date","user","party","service_type","status","amount","payment_type","notes"]
     sup_cols = ["id","date","user","supplier_name","service_type","paid_amt","pending_amt","partial_amt","payment_type","notes"]
-    cust_cols = ["customer_name"]
-    for key, cols in zip(FILES.keys(), [svc_cols, exp_cols, txn_cols, sup_cols, cust_cols]):
+    for key, cols in zip(FILES.keys(), [svc_cols, exp_cols, txn_cols, sup_cols]):
         if not os.path.exists(FILES[key]):
             save_csv(pd.DataFrame(columns=cols), FILES[key])
 
@@ -85,32 +88,27 @@ def next_id(df):
     except Exception:
         return len(df) + 1
 
-def filter_date(df, date_col="date", start_date=None, end_date=None):
+def filter_date(df, date_col="date", start=None, end=None):
     df[date_col] = pd.to_datetime(df[date_col])
-    if start_date:
-        df = df[df[date_col].dt.date >= start_date]
-    if end_date:
-        df = df[df[date_col].dt.date <= end_date]
+    if start:
+        df = df[df[date_col].dt.date >= start]
+    if end:
+        df = df[df[date_col].dt.date <= end]
     return df
 
 def color_status(val):
-    if val=="Paid":
-        color = 'background-color: lightgreen'
-    elif val=="Pending":
-        color = 'background-color: #ff9999'
-    elif val=="Partial":
-        color = 'background-color: orange'
-    else:
-        color = ''
+    if val=="Paid": color='background-color: lightgreen'
+    elif val=="Pending": color='background-color: #ff9999'
+    elif val=="Partial": color='background-color: orange'
+    else: color=''
     return color
 
 # -------------------------
 # Session State Init
 # -------------------------
-if "user" not in st.session_state:
-    st.session_state.user = None
-if "device" not in st.session_state:
-    st.session_state.device = None
+if "user" not in st.session_state: st.session_state.user = None
+if "device" not in st.session_state: st.session_state.device = None
+if "customers" not in st.session_state: st.session_state.customers = []
 
 ensure_datafiles_exist()
 
@@ -119,13 +117,6 @@ ensure_datafiles_exist()
 # -------------------------
 def login_page():
     st.title("🔐 Login - NANI ASSOCIATES")
-    st.write("Use one of the predefined accounts:")
-    st.markdown("""
-    - **admin / admin123** (desktop)  
-    - **user1 / user123** (desktop)  
-    - **user2 / user234** (desktop)  
-    - **mobile / mobile123** (mobile)
-    """)
     with st.form("login_form"):
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
@@ -151,24 +142,30 @@ def service_entry_page():
     user = st.session_state.user
     svc_cols = ["id","date","user","customer","service_type","num_apps","govt_amt","paid_amt","profit_amt","status","payment_type","notes"]
     df = load_csv(FILES["services"], svc_cols)
-    df_cust = load_csv(FILES["customers"], ["customer_name"])
-    customer_list = df_cust["customer_name"].dropna().unique().tolist()
+
+    # Auto pickup customers
+    customers = st.session_state.customers
 
     with st.form("svc_add_form", clear_on_submit=True):
         c1,c2 = st.columns(2)
         with c1:
             entry_date = st.date_input("Date", value=date.today())
-            customer = st.text_input("Customer / Agent", value="", placeholder="Start typing...") 
+            customer = st.selectbox("Customer / Agent", options=customers)
+            new_customer = st.text_input("Or add new customer")
             service_type = st.selectbox("Service Type", list(DEFAULT_GOVT_AMT.keys()))
         with c2:
-            num_apps = st.number_input("No. of Applications", min_value=1, value=1, step=1)
-            default_amt = DEFAULT_GOVT_AMT[service_type] if DEFAULT_GOVT_AMT[service_type] else 0.0
-            govt_amt = st.number_input("Government Amount (per app)", min_value=0.0, value=default_amt)
+            num_apps = st.number_input("No. of Applications", min_value=1, value=1)
+            default_amt = DEFAULT_GOVT_AMT.get(service_type, 0.0)
+            govt_amt = st.number_input("Government Amount (per app)", value=default_amt if default_amt else 0.0)
             paid_amt = st.number_input("Paid Amount (per app)", min_value=0.0, value=0.0)
             status = st.selectbox("Payment Status", ["Paid","Pending","Partial"])
             payment_type = st.selectbox("Payment Type", PAYMENT_TYPES)
             notes = st.text_input("Notes (optional)")
+
         if st.form_submit_button("➕ Add Service"):
+            if new_customer:
+                customer = new_customer
+                if customer not in customers: st.session_state.customers.append(customer)
             if not customer:
                 st.error("Enter customer / agent name")
             else:
@@ -183,19 +180,19 @@ def service_entry_page():
                 }
                 df = pd.concat([df,pd.DataFrame([new_row])], ignore_index=True)
                 save_csv(df, FILES["services"])
-                if customer not in customer_list:
-                    df_cust = pd.concat([df_cust,pd.DataFrame([{"customer_name":customer}])], ignore_index=True)
-                    save_csv(df_cust, FILES["customers"])
                 st.success("Service added ✅")
 
+    # Date filter
     st.markdown("---")
-    st.subheader("Search Services")
-    start_date = st.date_input("Start Date", value=date.today() - timedelta(days=30))
-    end_date = st.date_input("End Date", value=date.today())
-    filtered_df = filter_date(df[df["user"]==user], "date", start_date, end_date)
-    st.dataframe(filtered_df.style.applymap(color_status, subset=["status"]), use_container_width=True)
-    st.download_button("⬇️ Download CSV", filtered_df.to_csv(index=False).encode(), f"services_{user}.csv")
-    st.download_button("⬇️ Download Excel", df_to_excel_bytes(filtered_df,"Services"), f"services_{user}.xlsx")
+    st.subheader("Search Services by Date")
+    start_date = st.date_input("Start Date")
+    end_date = st.date_input("End Date")
+    df_filtered = filter_date(df, "date", start_date, end_date)
+    st.dataframe(df_filtered.style.applymap(color_status, subset=["status"]), use_container_width=True)
+    st.download_button("⬇️ Download CSV", df_filtered.to_csv(index=False).encode(), f"services_{user}.csv")
+    st.download_button("⬇️ Download Excel", df_to_excel_bytes(df_filtered,"Services"), f"services_{user}.xlsx")
+
+# Similar pages can be created for Expenses, Transactions, Suppliers with date filter, CSV/Excel, payments
 
 # -------------------------
 # Main
@@ -208,14 +205,12 @@ def main():
 
     st.sidebar.title("📊 NANI ASSOCIATES")
     st.sidebar.write(f"Logged in as: **{st.session_state.user}** ({st.session_state.device})")
-    if st.sidebar.button("Logout"):
-        logout()
+    if st.sidebar.button("Logout"): logout()
+    if st.sidebar.button("Backup All Data"):
+        for f in FILES.values(): backup_csv(f)
+        st.success("Backup completed ✅")
 
-    page = st.sidebar.radio("Menu", [
-        "Service Entry",
-    ])
-    if page=="Service Entry":
-        service_entry_page()
+    page = st.sidebar.radio("Menu", ["Service Entry"])
+    if page=="Service Entry": service_entry_page()
 
-if __name__=="__main__":
-    main()
+if __name__=="__main__": main()
