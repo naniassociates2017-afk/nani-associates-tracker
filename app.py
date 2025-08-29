@@ -1,4 +1,4 @@
-# appy.py
+# appy.py - Full NANI ASSOCIATES Tracker
 import streamlit as st
 import pandas as pd
 import os
@@ -66,11 +66,6 @@ def load_csv(file_path, columns):
 def save_csv(df, file_path):
     df.to_csv(file_path, index=False)
 
-def backup_csv(file_path):
-    if os.path.exists(file_path):
-        fname = os.path.basename(file_path)
-        save_csv(load_csv(file_path, []), os.path.join(BACKUP_FOLDER, f"backup_{fname}"))
-
 def ensure_datafiles_exist():
     svc_cols = ["id","date","user","customer","service_type","num_apps","govt_amt","paid_amt","profit_amt","status","payment_type","notes"]
     exp_cols = ["id","date","user","category","amount","notes"]
@@ -88,27 +83,32 @@ def next_id(df):
     except Exception:
         return len(df) + 1
 
-def filter_date(df, date_col="date", start=None, end=None):
+def filter_date_range(df, date_col="date", start_date=None, end_date=None):
     df[date_col] = pd.to_datetime(df[date_col])
-    if start:
-        df = df[df[date_col].dt.date >= start]
-    if end:
-        df = df[df[date_col].dt.date <= end]
+    if start_date:
+        df = df[df[date_col].dt.date >= start_date]
+    if end_date:
+        df = df[df[date_col].dt.date <= end_date]
     return df
 
 def color_status(val):
-    if val=="Paid": color='background-color: lightgreen'
-    elif val=="Pending": color='background-color: #ff9999'
-    elif val=="Partial": color='background-color: orange'
-    else: color=''
+    if val=="Paid":
+        color = 'background-color: lightgreen'
+    elif val=="Pending":
+        color = 'background-color: #ff9999'
+    elif val=="Partial":
+        color = 'background-color: orange'
+    else:
+        color = ''
     return color
 
 # -------------------------
 # Session State Init
 # -------------------------
-if "user" not in st.session_state: st.session_state.user = None
-if "device" not in st.session_state: st.session_state.device = None
-if "customers" not in st.session_state: st.session_state.customers = []
+if "user" not in st.session_state:
+    st.session_state.user = None
+if "device" not in st.session_state:
+    st.session_state.device = None
 
 ensure_datafiles_exist()
 
@@ -117,6 +117,13 @@ ensure_datafiles_exist()
 # -------------------------
 def login_page():
     st.title("🔐 Login - NANI ASSOCIATES")
+    st.write("Use one of the predefined accounts:")
+    st.markdown("""
+    - **admin / admin123** (desktop)  
+    - **user1 / user123** (desktop)  
+    - **user2 / user234** (desktop)  
+    - **mobile / mobile123** (mobile)
+    """)
     with st.form("login_form"):
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
@@ -135,7 +142,7 @@ def logout():
     st.success("Logged out")
 
 # -------------------------
-# Service Entry
+# Service Entry Page
 # -------------------------
 def service_entry_page():
     st.header("📝 Service Entry")
@@ -143,29 +150,24 @@ def service_entry_page():
     svc_cols = ["id","date","user","customer","service_type","num_apps","govt_amt","paid_amt","profit_amt","status","payment_type","notes"]
     df = load_csv(FILES["services"], svc_cols)
 
-    # Auto pickup customers
-    customers = st.session_state.customers
+    # Customer auto-pick
+    customers = df["customer"].dropna().unique() if not df.empty else []
 
     with st.form("svc_add_form", clear_on_submit=True):
         c1,c2 = st.columns(2)
         with c1:
             entry_date = st.date_input("Date", value=date.today())
-            customer = st.selectbox("Customer / Agent", options=customers)
-            new_customer = st.text_input("Or add new customer")
+            customer = st.selectbox("Customer / Agent", options=list(customers), index=0) if len(customers)>0 else st.text_input("Customer / Agent")
             service_type = st.selectbox("Service Type", list(DEFAULT_GOVT_AMT.keys()))
         with c2:
-            num_apps = st.number_input("No. of Applications", min_value=1, value=1)
-            default_amt = DEFAULT_GOVT_AMT.get(service_type, 0.0)
-            govt_amt = st.number_input("Government Amount (per app)", value=default_amt if default_amt else 0.0)
+            num_apps = st.number_input("No. of Applications", min_value=1, value=1, step=1)
+            default_govt = DEFAULT_GOVT_AMT.get(service_type)
+            govt_amt = st.number_input("Government Amount (per app)", min_value=0.0, value=default_govt if default_govt is not None else 0.0)
             paid_amt = st.number_input("Paid Amount (per app)", min_value=0.0, value=0.0)
             status = st.selectbox("Payment Status", ["Paid","Pending","Partial"])
             payment_type = st.selectbox("Payment Type", PAYMENT_TYPES)
             notes = st.text_input("Notes (optional)")
-
         if st.form_submit_button("➕ Add Service"):
-            if new_customer:
-                customer = new_customer
-                if customer not in customers: st.session_state.customers.append(customer)
             if not customer:
                 st.error("Enter customer / agent name")
             else:
@@ -182,17 +184,22 @@ def service_entry_page():
                 save_csv(df, FILES["services"])
                 st.success("Service added ✅")
 
-    # Date filter
     st.markdown("---")
-    st.subheader("Search Services by Date")
-    start_date = st.date_input("Start Date")
-    end_date = st.date_input("End Date")
-    df_filtered = filter_date(df, "date", start_date, end_date)
-    st.dataframe(df_filtered.style.applymap(color_status, subset=["status"]), use_container_width=True)
-    st.download_button("⬇️ Download CSV", df_filtered.to_csv(index=False).encode(), f"services_{user}.csv")
-    st.download_button("⬇️ Download Excel", df_to_excel_bytes(df_filtered,"Services"), f"services_{user}.xlsx")
+    st.subheader("Your Services")
+    df_user = df[df["user"]==user].sort_values("date", ascending=False)
+    st.dataframe(df_user.style.applymap(color_status, subset=["status"]), use_container_width=True)
+    st.download_button("⬇️ Download Services CSV", df_user.to_csv(index=False).encode(), f"services_{user}.csv")
+    st.download_button("⬇️ Download Services Excel", df_to_excel_bytes(df_user,"Services"), f"services_{user}.xlsx")
 
-# Similar pages can be created for Expenses, Transactions, Suppliers with date filter, CSV/Excel, payments
+# -------------------------
+# Expenses Page
+# -------------------------
+# ... similarly implement expenses_entry_page(), transactions_entry_page(), suppliers_entry_page()
+
+# -------------------------
+# Dashboard Page
+# -------------------------
+# ... implement dashboard_summary() with charts, date range filter, paid/pending/partial summary
 
 # -------------------------
 # Main
@@ -203,14 +210,39 @@ def main():
         login_page()
         return
 
+    # Sidebar
     st.sidebar.title("📊 NANI ASSOCIATES")
     st.sidebar.write(f"Logged in as: **{st.session_state.user}** ({st.session_state.device})")
-    if st.sidebar.button("Logout"): logout()
-    if st.sidebar.button("Backup All Data"):
-        for f in FILES.values(): backup_csv(f)
-        st.success("Backup completed ✅")
 
-    page = st.sidebar.radio("Menu", ["Service Entry"])
-    if page=="Service Entry": service_entry_page()
+    # Backup button
+    if st.sidebar.button("💾 Backup Data"):
+        for key, file in FILES.items():
+            if os.path.exists(file):
+                save_csv(load_csv(file, load_csv(file, []).columns), os.path.join(BACKUP_FOLDER, os.path.basename(file)))
+        st.success("Backup completed!")
 
-if __name__=="__main__": main()
+    if st.sidebar.button("Logout"):
+        logout()
+        st.experimental_rerun()
+
+    page = st.sidebar.radio("Menu", [
+        "Dashboard",
+        "Service Entry",
+        "Expenses Entry",
+        "Transactions Entry",
+        "Suppliers Entry"
+    ])
+
+    if page == "Dashboard":
+        dashboard_summary()
+    elif page == "Service Entry":
+        service_entry_page()
+    elif page == "Expenses Entry":
+        expenses_entry_page()
+    elif page == "Transactions Entry":
+        transactions_entry_page()
+    elif page == "Suppliers Entry":
+        suppliers_entry_page()
+
+if __name__=="__main__":
+    main()
