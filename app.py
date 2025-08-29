@@ -57,7 +57,7 @@ def load_csv(file_path, columns):
             df = pd.read_csv(file_path)
             for c in columns:
                 if c not in df.columns:
-                    df[c] = ""
+                    df[c] = 0 if "amt" in c.lower() or "amount" in c.lower() else ""
             return df[columns]
         except Exception:
             return pd.DataFrame(columns=columns)
@@ -70,7 +70,7 @@ def ensure_datafiles_exist():
     svc_cols = ["id","date","user","customer","service_type","num_apps","govt_amt","paid_amt","profit_amt","status","payment_type","notes"]
     exp_cols = ["id","date","user","category","amount","notes"]
     txn_cols = ["id","date","user","party","service_type","status","amount","payment_type","notes"]
-    sup_cols = ["id","date","user","supplier_name","service_type","paid_amt","pending_amt","partial_amt","payment_type","notes"]
+    sup_cols = ["id","date","user","supplier_name","service_type","paid_amt","pending_amt","partial_amt","profit_amt","payment_type","notes"]
     for key, cols in zip(FILES.keys(), [svc_cols, exp_cols, txn_cols, sup_cols]):
         if not os.path.exists(FILES[key]):
             save_csv(pd.DataFrame(columns=cols), FILES[key])
@@ -170,7 +170,7 @@ def service_entry_page():
                 st.success("Service added ✅")
 
     st.markdown("---")
-    st.subheader("Your Services")
+    st.subheader("Your Services with Profit/Loss")
     df_user = df[df["user"]==user].sort_values("date", ascending=False)
     st.dataframe(df_user.style.applymap(color_status, subset=["status"]), use_container_width=True)
     st.download_button("⬇️ Download Services CSV", df_user.to_csv(index=False).encode(), f"services_{user}.csv")
@@ -249,16 +249,15 @@ def transactions_entry_page():
     st.download_button("⬇️ Download Transactions Excel", df_to_excel_bytes(df_user,"Transactions"), f"transactions_{user}.xlsx")
 
 # -------------------------
-# Suppliers Entry with Service Breakdown
+# Suppliers Entry with Profit/Loss
 # -------------------------
 def suppliers_entry_page():
-    st.header("🏢 Suppliers Entry")
+    st.header("🏢 Suppliers Entry & Profit/Loss")
     user = st.session_state.user
-    sup_cols = ["id","date","user","supplier_name","service_type","paid_amt","pending_amt","partial_amt","payment_type","notes"]
+    sup_cols = ["id","date","user","supplier_name","service_type","paid_amt","pending_amt","partial_amt","profit_amt","payment_type","notes"]
     df = load_csv(FILES["suppliers"], sup_cols)
     suppliers = df["supplier_name"].dropna().unique().tolist()
 
-    # Form
     with st.form("sup_add_form", clear_on_submit=True):
         entry_date = st.date_input("Date", value=date.today())
         supplier = st.text_input("Supplier Name")
@@ -266,6 +265,8 @@ def suppliers_entry_page():
         paid_amt = st.number_input("Paid Amount", min_value=0.0)
         pending_amt = st.number_input("Pending Amount", min_value=0.0)
         partial_amt = st.number_input("Partial Amount", min_value=0.0)
+        # Profit for supplier = govt amt - paid_amt (negative means loss)
+        profit_amt = round(paid_amt - DEFAULT_GOVT_AMT.get(service_type,0.0),2)
         payment_type = st.selectbox("Payment Type", PAYMENT_TYPES)
         notes = st.text_input("Notes (optional)")
         if st.form_submit_button("➕ Add Supplier Entry"):
@@ -275,21 +276,19 @@ def suppliers_entry_page():
                 nid = next_id(df)
                 new_row = {"id":nid,"date":entry_date.strftime("%Y-%m-%d"),"user":user,"supplier_name":supplier,
                            "service_type":service_type,"paid_amt":paid_amt,"pending_amt":pending_amt,"partial_amt":partial_amt,
-                           "payment_type":payment_type,"notes":notes}
+                           "profit_amt":profit_amt,"payment_type":payment_type,"notes":notes}
                 df = pd.concat([df,pd.DataFrame([new_row])], ignore_index=True)
                 save_csv(df, FILES["suppliers"])
                 st.success("Supplier entry added ✅")
 
-    # Summary
     st.markdown("---")
-    st.subheader("Suppliers Summary by Service Type")
+    st.subheader("Suppliers Summary with Profit/Loss")
     if suppliers:
-        sup_summary = df.groupby(["supplier_name","service_type"])[["paid_amt","pending_amt","partial_amt"]].sum()
+        sup_summary = df.groupby(["supplier_name","service_type"])[["paid_amt","pending_amt","partial_amt","profit_amt"]].sum()
         st.dataframe(sup_summary)
         st.download_button("⬇️ Download Suppliers Summary CSV", sup_summary.to_csv().encode(), "suppliers_summary.csv")
         st.download_button("⬇️ Download Suppliers Summary Excel", df_to_excel_bytes(sup_summary,"Suppliers_Summary"), "suppliers_summary.xlsx")
 
-    # Supplier History
     st.markdown("### 🔍 Supplier History")
     supplier_select = st.selectbox("Select Supplier", suppliers)
     if supplier_select:
@@ -307,7 +306,7 @@ def dashboard_summary():
 
     df_svc = load_csv(FILES["services"], ["id","date","user","customer","service_type","num_apps","govt_amt","paid_amt","profit_amt","status","payment_type","notes"])
     df_txn = load_csv(FILES["transactions"], ["id","date","user","party","service_type","status","amount","payment_type","notes"])
-    df_sup = load_csv(FILES["suppliers"], ["id","date","user","supplier_name","service_type","paid_amt","pending_amt","partial_amt","payment_type","notes"])
+    df_sup = load_csv(FILES["suppliers"], ["id","date","user","supplier_name","service_type","paid_amt","pending_amt","partial_amt","profit_amt","payment_type","notes"])
     df_exp = load_csv(FILES["expenses"], ["id","date","user","category","amount","notes"])
 
     df_svc_user = df_svc[df_svc["user"]==user]
@@ -320,11 +319,13 @@ def dashboard_summary():
     sup_summary = pd.Series({"Paid": df_sup_user["paid_amt"].sum(),
                              "Pending": df_sup_user["pending_amt"].sum(),
                              "Partial": df_sup_user["partial_amt"].sum()})
+    profit_loss_svc = df_svc_user["profit_amt"].sum()
+    profit_loss_sup = df_sup_user["profit_amt"].sum()
 
     c1,c2,c3 = st.columns(3)
-    c1.metric("Services Paid", f"₹{svc_summary['Paid']}")
+    c1.metric("Services Paid", f"₹{svc_summary['Paid']}", f"Profit: ₹{profit_loss_svc}")
     c2.metric("Transactions Paid", f"₹{txn_summary['Paid']}")
-    c3.metric("Suppliers Paid", f"₹{sup_summary['Paid']}")
+    c3.metric("Suppliers Paid", f"₹{sup_summary['Paid']}", f"Profit: ₹{profit_loss_sup}")
     st.markdown("---")
 
 # -------------------------
