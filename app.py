@@ -2,16 +2,15 @@
 import streamlit as st
 import pandas as pd
 import os
-from datetime import date, timedelta, datetime
+from datetime import date, timedelta
 from io import BytesIO
+import zipfile
 
 # -------------------------
 # Config / Credentials
 # -------------------------
 DATA_FOLDER = "data"
-BACKUP_FOLDER = "backup"
 os.makedirs(DATA_FOLDER, exist_ok=True)
-os.makedirs(BACKUP_FOLDER, exist_ok=True)
 
 FILES = {
     "services": os.path.join(DATA_FOLDER, "services.csv"),
@@ -30,22 +29,22 @@ USER_CREDENTIALS = {
 PAYMENT_TYPES = ["Cash","UPI","Bank Transfer","Cheque","Other"]
 
 GOVT_AMOUNT_DEFAULTS = {
-    "NEW PAN CARD": 107.0,
-    "CORRECTION PAN CARD": 107.0,
-    "NEW PASSPORT": 1500.0,
-    "RENEWAL PASSPORT": 1500.0,
-    "DIGITAL SIGNATURE": 1400.0,
-    "VOTER ID": 0.0,
-    "NEW AADHAR CARD": 100.0,
+    "NEW PAN CARD": 107.00,
+    "CORRECTION PAN CARD": 107.00,
+    "NEW PASSPORT": 1500.00,
+    "RENEWAL PASSPORT": 1500.00,
+    "DIGITAL SIGNATURE": 1400.00,
+    "VOTER ID": 0.00,
+    "NEW AADHAR CARD": 100.00,
     "NAME CHANGE AADHAR CARD": None,
     "DATE OF BIRTH CHANGE IN AADHAR CARD": None,
     "AADHAR CARD PRINT": None,
-    "BIRTH CERTIFICATE": 3000.0,
+    "BIRTH CERTIFICATE": 3000.00,
     "OTHER ONLINE SERVICES": None
 }
 
 # -------------------------
-# Utilities
+# Utility Functions
 # -------------------------
 def df_to_excel_bytes(df: pd.DataFrame, sheet_name="Sheet1") -> bytes:
     out = BytesIO()
@@ -67,12 +66,10 @@ def load_csv(file_path, columns):
 
 def save_csv(df, file_path):
     df.to_csv(file_path, index=False)
-    backup_path = os.path.join(BACKUP_FOLDER, f"{os.path.basename(file_path).replace('.csv','')}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv")
-    df.to_csv(backup_path, index=False)
 
 def ensure_datafiles_exist():
     svc_cols = ["id","date","user","customer","service_type","num_apps","govt_amt","paid_amt","profit_amt","status","payment_type","notes"]
-    exp_cols = ["id","date","user","category","amount","status","payment_type","notes"]
+    exp_cols = ["id","date","user","category","amount","notes"]
     txn_cols = ["id","date","user","party","service_type","status","amount","payment_type","notes"]
     sup_cols = ["id","date","user","supplier_name","service_type","paid_amt","pending_amt","partial_amt","payment_type","notes"]
     for key, cols in zip(FILES.keys(), [svc_cols, exp_cols, txn_cols, sup_cols]):
@@ -87,23 +84,40 @@ def next_id(df):
     except Exception:
         return len(df) + 1
 
-def filter_date_range(df, date_col="date", start_date=None, end_date=None):
+def filter_date(df, date_col="date", period="Daily", start_date=None, end_date=None):
     df[date_col] = pd.to_datetime(df[date_col])
-    if start_date:
-        df = df[df[date_col].dt.date >= start_date]
-    if end_date:
-        df = df[df[date_col].dt.date <= end_date]
-    return df
+    today = date.today()
+    if period=="Daily":
+        return df[df[date_col].dt.date==today]
+    elif period=="Weekly":
+        week_ago = today - timedelta(days=7)
+        return df[df[date_col].dt.date>=week_ago]
+    elif period=="Monthly":
+        month_start = today.replace(day=1)
+        return df[df[date_col].dt.date>=month_start]
+    elif period=="Custom" and start_date and end_date:
+        return df[(df[date_col].dt.date>=start_date) & (df[date_col].dt.date<=end_date)]
+    else:
+        return df
 
 def color_status(val):
     if val=="Paid":
-        return 'background-color: lightgreen'
+        color = 'background-color: lightgreen'
     elif val=="Pending":
-        return 'background-color: #ff9999'
+        color = 'background-color: #ff9999'
     elif val=="Partial":
-        return 'background-color: orange'
+        color = 'background-color: orange'
     else:
-        return ''
+        color = ''
+    return color
+
+def backup_all_data():
+    zip_buffer = BytesIO()
+    with zipfile.ZipFile(zip_buffer, "w") as zf:
+        for key, path in FILES.items():
+            if os.path.exists(path):
+                zf.write(path, arcname=os.path.basename(path))
+    return zip_buffer.getvalue()
 
 # -------------------------
 # Session State Init
@@ -153,11 +167,18 @@ def service_entry_page():
     svc_cols = ["id","date","user","customer","service_type","num_apps","govt_amt","paid_amt","profit_amt","status","payment_type","notes"]
     df = load_csv(FILES["services"], svc_cols)
 
+    # Auto-suggest customers
+    previous_customers = df["customer"].dropna().unique().tolist()
+    previous_customers.sort()
+
     with st.form("svc_add_form", clear_on_submit=True):
         c1,c2 = st.columns(2)
         with c1:
             entry_date = st.date_input("Date", value=date.today())
-            customer = st.text_input("Customer / Agent")
+            customer_input = st.text_input("Customer / Agent")
+            customer = customer_input
+            if not customer_input and previous_customers:
+                customer = st.selectbox("Or select existing Customer / Agent", previous_customers)
             service_type = st.selectbox("Service Type", list(GOVT_AMOUNT_DEFAULTS.keys()))
         with c2:
             num_apps = st.number_input("No. of Applications", min_value=1, value=1)
@@ -188,136 +209,11 @@ def service_entry_page():
                 st.success("Service added ✅")
 
     st.markdown("---")
-    st.subheader("Search / Filter by Date")
-    start_date = st.date_input("From", value=date.today()-timedelta(days=30), key="svc_start")
-    end_date = st.date_input("To", value=date.today(), key="svc_end")
-    df_user = df[df["user"]==user]
-    df_filtered = filter_date_range(df_user,"date",start_date,end_date).sort_values("date", ascending=False)
-    st.dataframe(df_filtered.style.applymap(color_status, subset=["status"]), use_container_width=True)
-    st.download_button("⬇️ Download Services CSV", df_filtered.to_csv(index=False).encode(), f"services_{user}.csv")
-    st.download_button("⬇️ Download Services Excel", df_to_excel_bytes(df_filtered,"Services"), f"services_{user}.xlsx")
-
-# -------------------------
-# Expenses Entry
-# -------------------------
-def expenses_entry_page():
-    st.header("💵 Expenses Entry")
-    user = st.session_state.user
-    exp_cols = ["id","date","user","category","amount","status","payment_type","notes"]
-    df = load_csv(FILES["expenses"], exp_cols)
-
-    with st.form("exp_add_form", clear_on_submit=True):
-        entry_date = st.date_input("Date", value=date.today())
-        category = st.text_input("Category")
-        amount = st.number_input("Amount", min_value=0.0)
-        status = st.selectbox("Payment Status", ["Paid","Pending","Partial"])
-        payment_type = st.selectbox("Payment Type", PAYMENT_TYPES)
-        notes = st.text_input("Notes (optional)")
-        if st.form_submit_button("➕ Add Expense"):
-            if not category:
-                st.error("Enter category")
-            else:
-                nid = next_id(df)
-                new_row = {
-                    "id":nid,"date":entry_date.strftime("%Y-%m-%d"),"user":user,
-                    "category":category,"amount":amount,"status":status,"payment_type":payment_type,"notes":notes
-                }
-                df = pd.concat([df,pd.DataFrame([new_row])], ignore_index=True)
-                save_csv(df, FILES["expenses"])
-                st.success("Expense added ✅")
-
-    st.markdown("---")
-    st.subheader("Search / Filter by Date")
-    start_date = st.date_input("From", value=date.today()-timedelta(days=30), key="exp_start")
-    end_date = st.date_input("To", value=date.today(), key="exp_end")
-    df_user = df[df["user"]==user]
-    df_filtered = filter_date_range(df_user,"date",start_date,end_date).sort_values("date", ascending=False)
-    st.dataframe(df_filtered, use_container_width=True)
-    st.download_button("⬇️ Download Expenses CSV", df_filtered.to_csv(index=False).encode(), f"expenses_{user}.csv")
-    st.download_button("⬇️ Download Expenses Excel", df_to_excel_bytes(df_filtered,"Expenses"), f"expenses_{user}.xlsx")
-
-# -------------------------
-# Transactions Entry
-# -------------------------
-def transactions_entry_page():
-    st.header("💳 Transactions Entry")
-    user = st.session_state.user
-    txn_cols = ["id","date","user","party","service_type","status","amount","payment_type","notes"]
-    df = load_csv(FILES["transactions"], txn_cols)
-
-    with st.form("txn_add_form", clear_on_submit=True):
-        entry_date = st.date_input("Date", value=date.today())
-        party = st.text_input("Party Name")
-        service_type = st.text_input("Service Type")
-        status = st.selectbox("Payment Status", ["Paid","Pending","Partial"])
-        amount = st.number_input("Amount", min_value=0.0)
-        payment_type = st.selectbox("Payment Type", PAYMENT_TYPES)
-        notes = st.text_input("Notes (optional)")
-        if st.form_submit_button("➕ Add Transaction"):
-            if not party or not service_type:
-                st.error("Enter party and service type")
-            else:
-                nid = next_id(df)
-                new_row = {
-                    "id":nid,"date":entry_date.strftime("%Y-%m-%d"),"user":user,
-                    "party":party,"service_type":service_type,"status":status,"amount":amount,"payment_type":payment_type,"notes":notes
-                }
-                df = pd.concat([df,pd.DataFrame([new_row])], ignore_index=True)
-                save_csv(df, FILES["transactions"])
-                st.success("Transaction added ✅")
-
-    st.markdown("---")
-    st.subheader("Search / Filter by Date")
-    start_date = st.date_input("From", value=date.today()-timedelta(days=30), key="txn_start")
-    end_date = st.date_input("To", value=date.today(), key="txn_end")
-    df_user = df[df["user"]==user]
-    df_filtered = filter_date_range(df_user,"date",start_date,end_date).sort_values("date", ascending=False)
-    st.dataframe(df_filtered.style.applymap(color_status, subset=["status"]), use_container_width=True)
-    st.download_button("⬇️ Download Transactions CSV", df_filtered.to_csv(index=False).encode(), f"transactions_{user}.csv")
-    st.download_button("⬇️ Download Transactions Excel", df_to_excel_bytes(df_filtered,"Transactions"), f"transactions_{user}.xlsx")
-
-# -------------------------
-# Suppliers Entry
-# -------------------------
-def suppliers_entry_page():
-    st.header("🏢 Suppliers Entry")
-    user = st.session_state.user
-    sup_cols = ["id","date","user","supplier_name","service_type","paid_amt","pending_amt","partial_amt","payment_type","notes"]
-    df = load_csv(FILES["suppliers"], sup_cols)
-
-    with st.form("sup_add_form", clear_on_submit=True):
-        entry_date = st.date_input("Date", value=date.today())
-        supplier = st.text_input("Supplier Name")
-        service_type = st.text_input("Service Type")
-        paid_amt = st.number_input("Paid Amount", min_value=0.0)
-        pending_amt = st.number_input("Pending Amount", min_value=0.0)
-        partial_amt = st.number_input("Partial Amount", min_value=0.0)
-        payment_type = st.selectbox("Payment Type", PAYMENT_TYPES)
-        notes = st.text_input("Notes (optional)")
-        if st.form_submit_button("➕ Add Supplier Entry"):
-            if not supplier or not service_type:
-                st.error("Enter supplier and service type")
-            else:
-                nid = next_id(df)
-                new_row = {
-                    "id":nid,"date":entry_date.strftime("%Y-%m-%d"),"user":user,
-                    "supplier_name":supplier,"service_type":service_type,
-                    "paid_amt":paid_amt,"pending_amt":pending_amt,"partial_amt":partial_amt,
-                    "payment_type":payment_type,"notes":notes
-                }
-                df = pd.concat([df,pd.DataFrame([new_row])], ignore_index=True)
-                save_csv(df, FILES["suppliers"])
-                st.success("Supplier added ✅")
-
-    st.markdown("---")
-    st.subheader("Search / Filter by Date")
-    start_date = st.date_input("From", value=date.today()-timedelta(days=30), key="sup_start")
-    end_date = st.date_input("To", value=date.today(), key="sup_end")
-    df_user = df[df["user"]==user]
-    df_filtered = filter_date_range(df_user,"date",start_date,end_date).sort_values("date", ascending=False)
-    st.dataframe(df_filtered, use_container_width=True)
-    st.download_button("⬇️ Download Suppliers CSV", df_filtered.to_csv(index=False).encode(), f"suppliers_{user}.csv")
-    st.download_button("⬇️ Download Suppliers Excel", df_to_excel_bytes(df_filtered,"Suppliers"), f"suppliers_{user}.xlsx")
+    st.subheader("Your Services")
+    df_user = df[df["user"]==user].sort_values("date", ascending=False)
+    st.dataframe(df_user.style.applymap(color_status, subset=["status"]), use_container_width=True)
+    st.download_button("⬇️ Download Services CSV", df_user.to_csv(index=False).encode(), f"services_{user}.csv")
+    st.download_button("⬇️ Download Services Excel", df_to_excel_bytes(df_user,"Services"), f"services_{user}.xlsx")
 
 # -------------------------
 # Dashboard / Analytics
@@ -327,31 +223,27 @@ def dashboard_summary():
     user = st.session_state.user
 
     svc_cols = ["id","date","user","customer","service_type","num_apps","govt_amt","paid_amt","profit_amt","status","payment_type","notes"]
-    txn_cols = ["id","date","user","party","service_type","status","amount","payment_type","notes"]
-    sup_cols = ["id","date","user","supplier_name","service_type","paid_amt","pending_amt","partial_amt","payment_type","notes"]
-    exp_cols = ["id","date","user","category","amount","status","payment_type","notes"]
-
     df_svc = load_csv(FILES["services"], svc_cols)
-    df_txn = load_csv(FILES["transactions"], txn_cols)
-    df_sup = load_csv(FILES["suppliers"], sup_cols)
-    df_exp = load_csv(FILES["expenses"], exp_cols)
-
     df_svc_user = df_svc[df_svc["user"]==user]
-    df_txn_user = df_txn[df_txn["user"]==user]
-    df_sup_user = df_sup[df_sup["user"]==user]
-    df_exp_user = df_exp[df_exp["user"]==user]
 
-    # Summaries
-    svc_summary = df_svc_user.groupby("status")["paid_amt"].sum().reindex(["Paid","Pending","Partial"], fill_value=0)
-    txn_summary = df_txn_user.groupby("status")["amount"].sum().reindex(["Paid","Pending","Partial"], fill_value=0)
-    sup_summary = pd.Series({"Paid": df_sup_user["paid_amt"].sum(),"Pending": df_sup_user["pending_amt"].sum(),"Partial": df_sup_user["partial_amt"].sum()})
-    exp_summary = df_exp_user.groupby("status")["amount"].sum().reindex(["Paid","Pending","Partial"], fill_value=0)
+    st.subheader("📈 Service / Product Analytics")
+    period = st.selectbox("Select Period", ["Daily","Weekly","Monthly","All","Custom"])
+    start_date = end_date = None
+    if period=="Custom":
+        c1,c2 = st.columns(2)
+        with c1:
+            start_date = st.date_input("Start Date", date.today() - timedelta(days=30))
+        with c2:
+            end_date = st.date_input("End Date", date.today())
 
-    c1,c2,c3,c4 = st.columns(4)
-    c1.metric("Services Paid", f"₹{svc_summary['Paid']}", f"Pending: ₹{svc_summary['Pending']}, Partial: ₹{svc_summary['Partial']}")
-    c2.metric("Transactions Paid", f"₹{txn_summary['Paid']}", f"Pending: ₹{txn_summary['Pending']}, Partial: ₹{txn_summary['Partial']}")
-    c3.metric("Suppliers Paid", f"₹{sup_summary['Paid']}", f"Pending: ₹{sup_summary['Pending']}, Partial: ₹{sup_summary['Partial']}")
-    c4.metric("Expenses Paid", f"₹{exp_summary['Paid']}", f"Pending: ₹{exp_summary['Pending']}, Partial: ₹{exp_summary['Partial']}")
+    df_svc_period = filter_date(df_svc_user, "date", period, start_date, end_date)
+    if not df_svc_period.empty:
+        chart_data = df_svc_period.groupby("service_type")[["num_apps","paid_amt","profit_amt"]].sum()
+        st.bar_chart(chart_data[["num_apps"]], use_container_width=True)
+        st.bar_chart(chart_data[["paid_amt"]], use_container_width=True)
+        st.bar_chart(chart_data[["profit_amt"]], use_container_width=True)
+    else:
+        st.info("No services in this period")
 
 # -------------------------
 # Main
@@ -367,23 +259,21 @@ def main():
     if st.sidebar.button("Logout"):
         logout()
 
+    # Backup Button
+    st.sidebar.markdown("### 💾 Backup")
+    if st.sidebar.button("Backup All Data"):
+        zip_bytes = backup_all_data()
+        st.sidebar.download_button("⬇️ Download Backup ZIP", zip_bytes, "nani_associates_backup.zip")
+
     page = st.sidebar.radio("Menu", [
         "Dashboard",
         "Service Entry",
-        "Expenses Entry",
-        "Transactions Entry",
-        "Suppliers Entry"
+        # You can add Expenses, Transactions, Suppliers pages here
     ])
     if page=="Dashboard":
         dashboard_summary()
     elif page=="Service Entry":
         service_entry_page()
-    elif page=="Expenses Entry":
-        expenses_entry_page()
-    elif page=="Transactions Entry":
-        transactions_entry_page()
-    elif page=="Suppliers Entry":
-        suppliers_entry_page()
 
 if __name__=="__main__":
     main()
