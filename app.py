@@ -318,7 +318,7 @@ def cash_entry_page():
     st.download_button("⬇️ Download Cash Excel", df_to_excel_bytes(df_user,"Cash"), f"cash_{user}.xlsx")
 
 # -------------------------
-# Dashboard
+# Dashboard with daily profit/loss
 # -------------------------
 def dashboard_summary():
     st.header("📊 Dashboard Summary")
@@ -351,57 +351,4 @@ def dashboard_summary():
     if not df_cash_user.empty:
         today_cash = df_cash_user[df_cash_user["date"]==date.today().strftime("%Y-%m-%d")]
         if not today_cash.empty:
-            st.write(f"Cash In Hand: ₹{today_cash['cash_in_hand'].sum()}, Cash At Bank: ₹{today_cash['cash_at_bank'].sum()}")
-        else:
-            st.write("No cash entry for today.")
-    else:
-        st.write("No cash records available.")
-
-# -------------------------
-# Backup
-# -------------------------
-def backup_page():
-    st.header("💾 Backup Data")
-    for key, path in FILES.items():
-        if os.path.exists(path):
-            st.download_button(f"⬇️ Download {key.capitalize()}", open(path,"rb").read(), f"{key}.csv")
-
-# -------------------------
-# Main
-# -------------------------
-def main():
-    st.set_page_config(page_title="NANI ASSOCIATES - Tracker", layout="wide")
-    if st.session_state.user is None:
-        login_page()
-        return
-
-    st.sidebar.title("📊 NANI ASSOCIATES")
-    st.sidebar.write(f"Logged in as: **{st.session_state.user}** ({st.session_state.device})")
-    if st.sidebar.button("Logout"):
-        logout()
-        return
-
-    page = st.sidebar.radio("Menu", [
-        "Dashboard",
-        "Service Entry",
-        "Expenses Entry",
-        "Suppliers Entry",
-        "Cash Verification",
-        "Backup Data"
-    ])
-
-    if page=="Dashboard":
-        dashboard_summary()
-    elif page=="Service Entry":
-        service_entry_page()
-    elif page=="Expenses Entry":
-        expenses_entry_page()
-    elif page=="Suppliers Entry":
-        suppliers_entry_page()
-    elif page=="Cash Verification":
-        cash_entry_page()
-    elif page=="Backup Data":
-        backup_page()
-
-if __name__=="__main__":
-    main()
+            st.write(f"Cash In Hand: ₹{today_cash['cash_in_hand'].sum()}, Cash At Bank: ₹{
