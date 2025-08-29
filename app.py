@@ -351,4 +351,25 @@ def dashboard_summary():
     if not df_cash_user.empty:
         today_cash = df_cash_user[df_cash_user["date"]==date.today().strftime("%Y-%m-%d")]
         if not today_cash.empty:
-            st.write(f"Cash In Hand: ₹{today_cash['cash_in_hand'].sum()}, Cash At Bank: ₹{
+            st.write(f"Cash In Hand: ₹{today_cash['cash_in_hand'].sum()}, Cash At Bank: ₹{today_cash['cash_at_bank'].sum()}")
+
+# -------------------------
+# Main
+# -------------------------
+if st.session_state.user is None:
+    login_page()
+else:
+    st.sidebar.title("NANI ASSOCIATES")
+    st.sidebar.write(f"Logged in as: {st.session_state.user}")
+    page = st.sidebar.selectbox("Navigation", ["Dashboard","Service Entry","Suppliers Entry","Expenses Entry","Cash Entry"])
+    st.sidebar.button("Logout", on_click=logout)
+    if page=="Dashboard":
+        dashboard_summary()
+    elif page=="Service Entry":
+        service_entry_page()
+    elif page=="Suppliers Entry":
+        suppliers_entry_page()
+    elif page=="Expenses Entry":
+        expenses_entry_page()
+    elif page=="Cash Entry":
+        cash_entry_page()
