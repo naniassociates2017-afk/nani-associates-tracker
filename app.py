@@ -16,7 +16,7 @@ FILES = {
     "expenses": os.path.join(DATA_FOLDER, "expenses.csv"),
     "transactions": os.path.join(DATA_FOLDER, "transactions.csv"),
     "suppliers": os.path.join(DATA_FOLDER, "suppliers.csv"),
-    "customers": os.path.join(DATA_FOLDER, "customers.csv"),
+    "customers": os.path.join(DATA_FOLDER, "customers.csv")
 }
 
 USER_CREDENTIALS = {
@@ -27,18 +27,20 @@ USER_CREDENTIALS = {
 }
 
 PAYMENT_TYPES = ["Cash","UPI","Bank Transfer","Cheque","Other"]
+
 DEFAULT_GOVT_AMT = {
-    "NEW PAN CARD":107.0,
-    "CORRECTION PAN CARD":107.0,
-    "NEW PASSPORT":1500.0,
-    "RENEWAL PASSPORT":1500.0,
-    "DIGITAL SIGNATURE":1400.0,
-    "VOTER ID":0.0,
-    "NEW AADHAR CARD":100.0,
-    "NAME CHANGE AADHAR CARD":"manual",
-    "DATE OF BIRTH CHANGE IN AADHAR CARD":"manual",
-    "BIRTH CERTIFICATE":3000.0,
-    "OTHER ONLINE SERVICES":"manual"
+    "NEW PAN CARD": 107.0,
+    "CORRECTION PAN CARD": 107.0,
+    "NEW PASSPORT": 1500.0,
+    "RENEWAL PASSPORT": 1500.0,
+    "DIGITAL SIGNATURE": 1400.0,
+    "VOTER ID": 0.0,
+    "NEW AADHAR CARD": 100.0,
+    "NAME CHANGE AADHAR CARD": None,
+    "DATE OF BIRTH CHANGE IN AADHAR CARD": None,
+    "AADHAR CARD PRINT": None,
+    "BIRTH CERTIFICATE": 3000.0,
+    "OTHER ONLINE SERVICES": None
 }
 
 # -------------------------
@@ -83,10 +85,12 @@ def next_id(df):
     except Exception:
         return len(df) + 1
 
-def filter_date_range(df, date_col="date", start=None, end=None):
+def filter_date(df, date_col="date", start_date=None, end_date=None):
     df[date_col] = pd.to_datetime(df[date_col])
-    if start: df = df[df[date_col].dt.date >= start]
-    if end: df = df[df[date_col].dt.date <= end]
+    if start_date:
+        df = df[df[date_col].dt.date >= start_date]
+    if end_date:
+        df = df[df[date_col].dt.date <= end_date]
     return df
 
 def color_status(val):
@@ -140,7 +144,7 @@ def logout():
     st.success("Logged out")
 
 # -------------------------
-# Service Entry Page with Customer Auto-Save
+# Service Entry
 # -------------------------
 def service_entry_page():
     st.header("📝 Service Entry")
@@ -148,22 +152,22 @@ def service_entry_page():
     svc_cols = ["id","date","user","customer","service_type","num_apps","govt_amt","paid_amt","profit_amt","status","payment_type","notes"]
     df = load_csv(FILES["services"], svc_cols)
     df_cust = load_csv(FILES["customers"], ["customer_name"])
+    customer_list = df_cust["customer_name"].dropna().unique().tolist()
 
     with st.form("svc_add_form", clear_on_submit=True):
         c1,c2 = st.columns(2)
         with c1:
             entry_date = st.date_input("Date", value=date.today())
-            customer = st.selectbox("Customer / Agent", df_cust["customer_name"].tolist())
+            customer = st.text_input("Customer / Agent", value="", placeholder="Start typing...") 
             service_type = st.selectbox("Service Type", list(DEFAULT_GOVT_AMT.keys()))
         with c2:
             num_apps = st.number_input("No. of Applications", min_value=1, value=1, step=1)
-            default_govt = DEFAULT_GOVT_AMT.get(service_type, 0)
-            govt_amt = st.number_input("Government Amount (per app)", min_value=0.0, value=float(default_govt) if default_govt!="manual" else 0.0)
+            default_amt = DEFAULT_GOVT_AMT[service_type] if DEFAULT_GOVT_AMT[service_type] else 0.0
+            govt_amt = st.number_input("Government Amount (per app)", min_value=0.0, value=default_amt)
             paid_amt = st.number_input("Paid Amount (per app)", min_value=0.0, value=0.0)
             status = st.selectbox("Payment Status", ["Paid","Pending","Partial"])
             payment_type = st.selectbox("Payment Type", PAYMENT_TYPES)
             notes = st.text_input("Notes (optional)")
-
         if st.form_submit_button("➕ Add Service"):
             if not customer:
                 st.error("Enter customer / agent name")
@@ -179,26 +183,22 @@ def service_entry_page():
                 }
                 df = pd.concat([df,pd.DataFrame([new_row])], ignore_index=True)
                 save_csv(df, FILES["services"])
-
-                # Save customer for auto-pickup
-                if customer not in df_cust["customer_name"].tolist():
-                    df_cust = pd.concat([df_cust, pd.DataFrame([{"customer_name":customer}])], ignore_index=True)
+                if customer not in customer_list:
+                    df_cust = pd.concat([df_cust,pd.DataFrame([{"customer_name":customer}])], ignore_index=True)
                     save_csv(df_cust, FILES["customers"])
                 st.success("Service added ✅")
 
     st.markdown("---")
-    st.subheader("Your Services")
-
-    start_date = st.date_input("Start Date", date.today()-timedelta(days=30))
-    end_date = st.date_input("End Date", date.today())
-    df_filtered = filter_date_range(df[df["user"]==user], "date", start_date, end_date)
-
-    st.dataframe(df_filtered.style.applymap(color_status, subset=["status"]), use_container_width=True)
-    st.download_button("⬇️ Download Services CSV", df_filtered.to_csv(index=False).encode(), f"services_{user}.csv")
-    st.download_button("⬇️ Download Services Excel", df_to_excel_bytes(df_filtered,"Services"), f"services_{user}.xlsx")
+    st.subheader("Search Services")
+    start_date = st.date_input("Start Date", value=date.today() - timedelta(days=30))
+    end_date = st.date_input("End Date", value=date.today())
+    filtered_df = filter_date(df[df["user"]==user], "date", start_date, end_date)
+    st.dataframe(filtered_df.style.applymap(color_status, subset=["status"]), use_container_width=True)
+    st.download_button("⬇️ Download CSV", filtered_df.to_csv(index=False).encode(), f"services_{user}.csv")
+    st.download_button("⬇️ Download Excel", df_to_excel_bytes(filtered_df,"Services"), f"services_{user}.xlsx")
 
 # -------------------------
-# Main App
+# Main
 # -------------------------
 def main():
     st.set_page_config(page_title="NANI ASSOCIATES - Tracker", layout="wide")
@@ -211,8 +211,9 @@ def main():
     if st.sidebar.button("Logout"):
         logout()
 
-    page = st.sidebar.radio("Menu", ["Service Entry"])
-
+    page = st.sidebar.radio("Menu", [
+        "Service Entry",
+    ])
     if page=="Service Entry":
         service_entry_page()
 
