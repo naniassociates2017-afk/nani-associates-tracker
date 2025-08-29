@@ -249,7 +249,7 @@ def transactions_entry_page():
     st.download_button("⬇️ Download Transactions Excel", df_to_excel_bytes(df_user,"Transactions"), f"transactions_{user}.xlsx")
 
 # -------------------------
-# Suppliers Entry
+# Suppliers Entry with Service Breakdown
 # -------------------------
 def suppliers_entry_page():
     st.header("🏢 Suppliers Entry")
@@ -282,9 +282,9 @@ def suppliers_entry_page():
 
     # Summary
     st.markdown("---")
-    st.subheader("Suppliers Summary")
+    st.subheader("Suppliers Summary by Service Type")
     if suppliers:
-        sup_summary = df.groupby("supplier_name")[["paid_amt","pending_amt","partial_amt"]].sum()
+        sup_summary = df.groupby(["supplier_name","service_type"])[["paid_amt","pending_amt","partial_amt"]].sum()
         st.dataframe(sup_summary)
         st.download_button("⬇️ Download Suppliers Summary CSV", sup_summary.to_csv().encode(), "suppliers_summary.csv")
         st.download_button("⬇️ Download Suppliers Summary Excel", df_to_excel_bytes(sup_summary,"Suppliers_Summary"), "suppliers_summary.xlsx")
