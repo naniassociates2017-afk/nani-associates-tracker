@@ -65,13 +65,26 @@ def dashboard_summary():
     if FILES["services"].exists():
         df = pd.read_csv(FILES["services"])
         if not df.empty:
+            df["date"] = pd.to_datetime(df["date"], errors="coerce")
             df["govt_amt"] = pd.to_numeric(df["govt_amt"], errors="coerce").fillna(0)
             df["paid_amt"] = pd.to_numeric(df["paid_amt"], errors="coerce").fillna(0)
             df["profit_amt"] = df["paid_amt"] - df["govt_amt"]
 
-            total_govt = df["govt_amt"].sum()
-            total_paid = df["paid_amt"].sum()
-            total_profit = df["profit_amt"].sum()
+            # Date Filter
+            st.subheader("📅 Date Range Filter")
+            min_date = df["date"].min().date()
+            max_date = df["date"].max().date()
+            start_date, end_date = st.date_input(
+                "Select Date Range",
+                [min_date, max_date]
+            )
+
+            mask = (df["date"].dt.date >= start_date) & (df["date"].dt.date <= end_date)
+            filtered_df = df.loc[mask]
+
+            total_govt = filtered_df["govt_amt"].sum()
+            total_paid = filtered_df["paid_amt"].sum()
+            total_profit = filtered_df["profit_amt"].sum()
 
             col1, col2, col3 = st.columns(3)
             col1.metric("Total Govt Amount", f"₹{total_govt:,.2f}")
@@ -79,7 +92,7 @@ def dashboard_summary():
             col3.metric("Total Profit", f"₹{total_profit:,.2f}")
 
             st.subheader("📂 Transaction-wise Profit")
-            st.dataframe(df[["date","customer","agent","govt_amt","paid_amt","profit_amt","status"]].style.format({
+            st.dataframe(filtered_df[["date","customer","agent","govt_amt","paid_amt","profit_amt","status"]].style.format({
                 "govt_amt": "₹{:.2f}",
                 "paid_amt": "₹{:.2f}",
                 "profit_amt": "₹{:.2f}"
