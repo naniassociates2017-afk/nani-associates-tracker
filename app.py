@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import uuid
 from pathlib import Path
+from datetime import datetime
 
 # -----------------------------
 # 🔑 User Authentication
@@ -25,16 +26,15 @@ def login_page():
         else:
             st.error("❌ Invalid username or password")
 
-# Initialize login state
 if "logged_in" not in st.session_state:
     st.session_state["logged_in"] = False
 
 if not st.session_state["logged_in"]:
     login_page()
-    st.stop()  # ⛔ Stop app until login success
+    st.stop()
 
 # -----------------------------
-# 📂 Setup data folder & files
+# 📂 Data storage setup
 # -----------------------------
 DATA_FOLDER = Path("data")
 DATA_FOLDER.mkdir(exist_ok=True)
@@ -67,7 +67,7 @@ def dashboard_summary():
         if not df.empty:
             df["govt_amt"] = pd.to_numeric(df["govt_amt"], errors="coerce").fillna(0)
             df["paid_amt"] = pd.to_numeric(df["paid_amt"], errors="coerce").fillna(0)
-            df["profit_amt"] = pd.to_numeric(df["profit_amt"], errors="coerce").fillna(0)
+            df["profit_amt"] = df["paid_amt"] - df["govt_amt"]
 
             total_govt = df["govt_amt"].sum()
             total_paid = df["paid_amt"].sum()
@@ -77,6 +77,13 @@ def dashboard_summary():
             col1.metric("Total Govt Amount", f"₹{total_govt:,.2f}")
             col2.metric("Total Paid Amount", f"₹{total_paid:,.2f}")
             col3.metric("Total Profit", f"₹{total_profit:,.2f}")
+
+            st.subheader("📂 Transaction-wise Profit")
+            st.dataframe(df[["date","customer","agent","govt_amt","paid_amt","profit_amt","status"]].style.format({
+                "govt_amt": "₹{:.2f}",
+                "paid_amt": "₹{:.2f}",
+                "profit_amt": "₹{:.2f}"
+            }))
         else:
             st.info("No service data available yet.")
     else:
@@ -88,9 +95,10 @@ def dashboard_summary():
 def service_entry_page():
     st.header("📝 Service Entry")
 
-    df = load_csv(FILES["services"], ["id","customer","agent","govt_amt","paid_amt","profit_amt","status","notes"])
+    df = load_csv(FILES["services"], ["id","date","customer","agent","govt_amt","paid_amt","profit_amt","status","notes"])
 
     with st.form("service_form"):
+        date = st.date_input("Date", datetime.today())
         customer = st.text_input("Customer Name")
         agent = st.text_input("Agent Name")
         govt_amt = st.number_input("Govt Amount", min_value=0.0, format="%.2f")
@@ -103,6 +111,7 @@ def service_entry_page():
         if submitted:
             new_row = {
                 "id": str(uuid.uuid4()),
+                "date": str(date),
                 "customer": customer,
                 "agent": agent,
                 "govt_amt": round(govt_amt, 2),
@@ -118,29 +127,31 @@ def service_entry_page():
     if not df.empty:
         st.subheader("📂 Service Records")
         with st.expander("Customer / Agent History"):
-            st.dataframe(df[["customer","agent","status"]])
+            st.dataframe(df[["date","customer","agent","status"]])
 
         with st.expander("Paid Amounts"):
-            st.dataframe(df[["customer","govt_amt","paid_amt"]].style.format("₹{:.2f}"))
+            st.dataframe(df[["date","customer","govt_amt","paid_amt"]].style.format("₹{:.2f}"))
 
         with st.expander("Profit Summary"):
-            st.dataframe(df[["customer","profit_amt"]].style.format("₹{:.2f}"))
+            st.dataframe(df[["date","customer","profit_amt"]].style.format("₹{:.2f}"))
 
 # -----------------------------
 # 🏢 Suppliers Entry
 # -----------------------------
 def suppliers_entry_page():
     st.header("🏢 Suppliers Entry")
-    df = load_csv(FILES["suppliers"], ["id","supplier","amount","notes"])
+    df = load_csv(FILES["suppliers"], ["id","date","supplier","amount","notes"])
 
     with st.form("supplier_form"):
+        date = st.date_input("Date", datetime.today(), key="sup_date")
         supplier = st.text_input("Supplier Name")
-        amount = st.number_input("Amount", min_value=0.0, format="%.2f")
-        notes = st.text_area("Notes")
+        amount = st.number_input("Amount", min_value=0.0, format="%.2f", key="sup_amt")
+        notes = st.text_area("Notes", key="sup_notes")
         submitted = st.form_submit_button("Save Supplier Entry")
         if submitted:
             new_row = {
                 "id": str(uuid.uuid4()),
+                "date": str(date),
                 "supplier": supplier,
                 "amount": round(amount, 2),
                 "notes": notes,
@@ -157,16 +168,18 @@ def suppliers_entry_page():
 # -----------------------------
 def expenses_entry_page():
     st.header("💸 Expenses Entry")
-    df = load_csv(FILES["expenses"], ["id","category","amount","notes"])
+    df = load_csv(FILES["expenses"], ["id","date","category","amount","notes"])
 
     with st.form("expense_form"):
+        date = st.date_input("Date", datetime.today(), key="exp_date")
         category = st.text_input("Expense Category")
-        amount = st.number_input("Amount", min_value=0.0, format="%.2f")
-        notes = st.text_area("Notes")
+        amount = st.number_input("Amount", min_value=0.0, format="%.2f", key="exp_amt")
+        notes = st.text_area("Notes", key="exp_notes")
         submitted = st.form_submit_button("Save Expense Entry")
         if submitted:
             new_row = {
                 "id": str(uuid.uuid4()),
+                "date": str(date),
                 "category": category,
                 "amount": round(amount, 2),
                 "notes": notes,
@@ -183,16 +196,18 @@ def expenses_entry_page():
 # -----------------------------
 def cash_entry_page():
     st.header("💰 Cash Entry")
-    df = load_csv(FILES["cash"], ["id","source","amount","notes"])
+    df = load_csv(FILES["cash"], ["id","date","source","amount","notes"])
 
     with st.form("cash_form"):
+        date = st.date_input("Date", datetime.today(), key="cash_date")
         source = st.text_input("Cash Source")
-        amount = st.number_input("Amount", min_value=0.0, format="%.2f")
-        notes = st.text_area("Notes")
+        amount = st.number_input("Amount", min_value=0.0, format="%.2f", key="cash_amt")
+        notes = st.text_area("Notes", key="cash_notes")
         submitted = st.form_submit_button("Save Cash Entry")
         if submitted:
             new_row = {
                 "id": str(uuid.uuid4()),
+                "date": str(date),
                 "source": source,
                 "amount": round(amount, 2),
                 "notes": notes,
@@ -205,7 +220,7 @@ def cash_entry_page():
         st.dataframe(df.style.format({"amount": "₹{:.2f}"}))
 
 # -----------------------------
-# 🚀 Main App Navigation
+# 🚀 Main Navigation
 # -----------------------------
 st.set_page_config(page_title="Nani Associates App", layout="wide")
 
