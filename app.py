@@ -4,7 +4,37 @@ import uuid
 from pathlib import Path
 
 # -----------------------------
-# Setup folders and files
+# 🔑 User Authentication
+# -----------------------------
+USERS = {
+    "admin": "admin123",
+    "agent1": "agent123",
+    "agent2": "agent456",
+}
+
+def login_page():
+    st.title("🔑 Login Page")
+    username = st.text_input("Username")
+    password = st.text_input("Password", type="password")
+    if st.button("Login"):
+        if username in USERS and USERS[username] == password:
+            st.session_state["logged_in"] = True
+            st.session_state["user"] = username
+            st.success(f"✅ Welcome, {username}!")
+            st.rerun()
+        else:
+            st.error("❌ Invalid username or password")
+
+# Initialize login state
+if "logged_in" not in st.session_state:
+    st.session_state["logged_in"] = False
+
+if not st.session_state["logged_in"]:
+    login_page()
+    st.stop()  # ⛔ Stop app until login success
+
+# -----------------------------
+# 📂 Setup data folder & files
 # -----------------------------
 DATA_FOLDER = Path("data")
 DATA_FOLDER.mkdir(exist_ok=True)
@@ -30,7 +60,7 @@ def save_csv(file, df):
     df.to_csv(file, index=False)
 
 # -----------------------------
-# Dashboard Summary
+# 📊 Dashboard
 # -----------------------------
 def dashboard_summary():
     st.header("📊 Dashboard Summary")
@@ -56,7 +86,7 @@ def dashboard_summary():
         st.info("No service data available yet.")
 
 # -----------------------------
-# Service Entry Page
+# 📝 Service Entry
 # -----------------------------
 def service_entry_page():
     st.header("📝 Service Entry")
@@ -100,7 +130,7 @@ def service_entry_page():
             st.dataframe(df[["customer","profit_amt"]].style.format("₹{:.2f}"))
 
 # -----------------------------
-# Suppliers Entry Page
+# 🏢 Suppliers Entry
 # -----------------------------
 def suppliers_entry_page():
     st.header("🏢 Suppliers Entry")
@@ -126,7 +156,7 @@ def suppliers_entry_page():
         st.dataframe(df.style.format({"amount": "₹{:.2f}"}))
 
 # -----------------------------
-# Expenses Entry Page
+# 💸 Expenses Entry
 # -----------------------------
 def expenses_entry_page():
     st.header("💸 Expenses Entry")
@@ -152,7 +182,7 @@ def expenses_entry_page():
         st.dataframe(df.style.format({"amount": "₹{:.2f}"}))
 
 # -----------------------------
-# Cash Entry Page
+# 💰 Cash Entry
 # -----------------------------
 def cash_entry_page():
     st.header("💰 Cash Entry")
@@ -178,11 +208,12 @@ def cash_entry_page():
         st.dataframe(df.style.format({"amount": "₹{:.2f}"}))
 
 # -----------------------------
-# Main App
+# 🚀 Main App Navigation
 # -----------------------------
 st.set_page_config(page_title="Nani Associates App", layout="wide")
 
 st.sidebar.title("📌 Navigation")
+st.sidebar.write(f"👤 Logged in as: {st.session_state['user']}")
 page = st.sidebar.radio("Go to", ["Dashboard", "Service Entry", "Suppliers Entry", "Expenses Entry", "Cash Entry"])
 
 if page == "Dashboard":
