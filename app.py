@@ -1,659 +1,810 @@
-# app.py - NANI ASSOCIATES (single-file)
+# app.py — NANI ASSOCIATES (single file)
 # Run: pip install streamlit pandas
-#       streamlit run app.py
+#      streamlit run app.py
 
-import streamlit as st
+import os, io, csv, zipfile, hashlib, binascii, traceback, shutil
+from datetime import datetime, date, timedelta
+
 import sqlite3
 import pandas as pd
-from datetime import datetime, date, timedelta
-import os, csv, io, zipfile, traceback
+import streamlit as st
 
-# ---------------- CONFIG ----------------
+# ---------------- Configuration ----------------
 DB_PATH = "nani_associates.db"
+BACKUP_DIR = "backups"
 ADMIN_USERNAME = "NANIASSOCIATES"
-ADMIN_PASSWORD = "Chinni@gmail.com"
+ADMIN_PASSWORD = "Chinni@gmail.com"  # will be migrated to hash on first login
+APP_TITLE = "NANI ASSOCIATES"
 
-# default services to preload if none exist
+# Default service list (name-only, with optional govt amount)
 DEFAULT_SERVICES = [
-    ("SERVICE","PAN SERVICE","NEW PAN CARD",107),
-    ("SERVICE","PAN SERVICE","CORRECTION PAN CARD",107),
-    ("SERVICE","PAN SERVICE","TAN",77),
-    ("SERVICE","PAN SERVICE","ETDS",59),
-    ("SERVICE","PAN SERVICE","ETDS 100 FILES ABOVE",None),
-    ("SERVICE","PASSPORT","NEW PASSPORT",1550),
-    ("SERVICE","PASSPORT","MINOR PASSPORT",1050),
-    ("SERVICE","PASSPORT","RENEWAL PASSPORT",1550),
-    ("SERVICE","DIGITAL SIGNATURE","DIGITAL SIGNATURE",1500),
-    ("SERVICE","AADHAR SERVICE","NEW AADHAR",100),
-    ("SERVICE","AADHAR SERVICE","MOBILE NUMBER LINK",100),
-    ("SERVICE","AADHAR SERVICE","BIO MATRIC",150),
-    ("SERVICE","AADHAR SERVICE","ADDRESS CHANGE WITH PROOF",100),
-    ("SERVICE","AADHAR SERVICE","ADDRESS CHANGE WITHOUT PROOF",150),
-    ("SERVICE","AADHAR SERVICE","NAME CHANGE WITH PROOF",100),
-    ("SERVICE","AADHAR SERVICE","NAME CHANGE WITHOUT PROOF",150),
-    ("SERVICE","AADHAR SERVICE","DATE OF BIRTH CHANGE WITH PROOF",150),
-    ("SERVICE","AADHAR SERVICE","DATE OF BIRTH CHANGE WITHOUT PROOF",900),
-    ("SERVICE","BIRTH CERTIFICATE","BIRTH CERTIFICATE FOR CUSTOMER",3000),
-    ("SERVICE","BIRTH CERTIFICATE","BIRTH CERTIFICATE FOR AGENTS",3000),
-    ("SERVICE","VOTER SERVICE","NEW VOTER",0),
-    ("SERVICE","VOTER SERVICE","CORRECTION VOTER CARD",0),
-    ("SERVICE","MSME SRRVICE","MSME CERTIFICATE",0),
-    ("SERVICE","OTHER ONLINE SERVICE","OTHER SERVICES",None)
+    ("NEW PAN CARD", 107),
+    ("CORRECTION PAN CARD", 107),
+    ("TAN", 77),
+    ("ETDS", 59),
+    ("ETDS 100 FILES ABOVE", None),
+    ("NEW PASSPORT", 1550),
+    ("MINOR PASSPORT", 1050),
+    ("RENEWAL PASSPORT", 1550),
+    ("DIGITAL SIGNATURE", 1500),
+    ("NEW AADHAR", 100),
+    ("MOBILE NUMBER LINK", 100),
+    ("BIO MATRIC", 150),
+    ("ADDRESS CHANGE WITH PROOF", 100),
+    ("ADDRESS CHANGE WITHOUT PROOF", 150),
+    ("NAME CHANGE WITH PROOF", 100),
+    ("NAME CHANGE WITHOUT PROOF", 150),
+    ("DATE OF BIRTH CHANGE WITH PROOF", 150),
+    ("DATE OF BIRTH CHANGE WITHOUT PROOF", 900),
+    ("BIRTH CERTIFICATE FOR CUSTOMER", 3000),
+    ("BIRTH CERTIFICATE FOR AGENTS", 3000),
+    ("NEW VOTER", 0),
+    ("CORRECTION VOTER CARD", 0),
+    ("MSME CERTIFICATE", 0),
+    ("OTHER SERVICES", None),
 ]
 
-# ---------------- DB safety helper ----------------
-def backup_and_restore_table(cursor, table_name, expected_columns, create_sql):
-    """If existing table schema differs, export old table to CSV and drop it,
-       then create the correct table and attempt best-effort restore from CSV."""
+# ---------------- Helpers: hashing & rerun ----------------
+def gen_salt():
+    return binascii.hexlify(os.urandom(16)).decode()
+
+def hash_password(password, salt):
+    return hashlib.sha256((salt + password).encode()).hexdigest()
+
+def verify_hash(password, salt, stored_hash):
+    return hash_password(password, salt) == stored_hash
+
+def safe_rerun():
     try:
-        cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
-        if cursor.fetchone():
-            cursor.execute(f"PRAGMA table_info({table_name})")
-            existing_cols = [r[1] for r in cursor.fetchall()]
-            if existing_cols != expected_columns:
-                # backup
-                cursor.execute(f"SELECT * FROM {table_name}")
-                rows = cursor.fetchall()
-                if rows:
-                    backup_file = f"{table_name}_backup.csv"
-                    with open(backup_file, "w", newline="", encoding="utf-8") as f:
-                        w = csv.writer(f)
-                        w.writerow(existing_cols)
-                        w.writerows(rows)
-                    print(f"[backup] {table_name} exported to {backup_file}")
-                cursor.execute(f"DROP TABLE IF EXISTS {table_name}")
-        # create table
-        cursor.execute(create_sql)
-        # restore if backup exists
-        backup_file = f"{table_name}_backup.csv"
-        if os.path.exists(backup_file):
-            with open(backup_file, "r", encoding="utf-8") as f:
-                reader = csv.DictReader(f)
-                restored = 0
-                for row in reader:
-                    vals = [row.get(col, None) for col in expected_columns]
-                    try:
-                        placeholders = ",".join("?" * len(expected_columns))
-                        cols_join = ",".join(expected_columns)
-                        cursor.execute(f"INSERT INTO {table_name}({cols_join}) VALUES ({placeholders})", vals)
-                        restored += 1
-                    except Exception as e:
-                        # best-effort: skip rows that fail
-                        print("restore skip row:", e)
-                if restored:
-                    print(f"[restore] {restored} rows restored into {table_name}")
-    except Exception as e:
-        print("backup_and_restore_table error:", e)
-        traceback.print_exc()
+        st.rerun()
+    except AttributeError:
+        try:
+            st.experimental_rerun()
+        except Exception:
+            st.warning("Please refresh the page manually.")
 
-# ---------------- DB initialization ----------------
-def init_db():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    c = conn.cursor()
-
-    # users
-    c.execute('''CREATE TABLE IF NOT EXISTS users (
-        id INTEGER PRIMARY KEY,
-        username TEXT UNIQUE,
-        password TEXT
-    )''')
-    # ensure admin
-    c.execute("SELECT * FROM users WHERE username=?", (ADMIN_USERNAME,))
-    if c.fetchone() is None:
-        c.execute("INSERT INTO users(username, password) VALUES (?,?)", (ADMIN_USERNAME, ADMIN_PASSWORD))
-
-    # expected schemas & create statements
-    applications_expected = ["id","customer_name","service_id","service_name","govt_amount","charged_amount",
-                             "payment_received","payment_pending","profit","payment_method","agent_name","created_at","note"]
-    applications_create = '''
-    CREATE TABLE IF NOT EXISTS applications(
-        id INTEGER PRIMARY KEY,
-        customer_name TEXT,
-        service_id INTEGER,
-        service_name TEXT,
-        govt_amount REAL,
-        charged_amount REAL,
-        payment_received REAL,
-        payment_pending REAL,
-        profit REAL,
-        payment_method TEXT,
-        agent_name TEXT,
-        created_at TEXT,
-        note TEXT
-    )
-    '''
-
-    expenses_expected = ["id","category","amount","date","note"]
-    expenses_create = '''
-    CREATE TABLE IF NOT EXISTS expenses(
-        id INTEGER PRIMARY KEY,
-        category TEXT,
-        amount REAL,
-        date TEXT,
-        note TEXT
-    )
-    '''
-
-    suppliers_expected = ["id","name","contact","type"]
-    suppliers_create = '''
-    CREATE TABLE IF NOT EXISTS suppliers(
-        id INTEGER PRIMARY KEY,
-        name TEXT,
-        contact TEXT,
-        type TEXT
-    )
-    '''
-
-    ledger_expected = ["id","supplier_id","amount","credit_or_debit","note","date"]
-    ledger_create = '''
-    CREATE TABLE IF NOT EXISTS ledger(
-        id INTEGER PRIMARY KEY,
-        supplier_id INTEGER,
-        amount REAL,
-        credit_or_debit TEXT,
-        note TEXT,
-        date TEXT
-    )
-    '''
-
-    services_expected = ["id","main_category","sub_category","product_name","govt_amount"]
-    services_create = '''
-    CREATE TABLE IF NOT EXISTS services(
-        id INTEGER PRIMARY KEY,
-        main_category TEXT,
-        sub_category TEXT,
-        product_name TEXT,
-        govt_amount REAL
-    )
-    '''
-
-    cash_expected = ["id","type","amount","date","note"]
-    cash_create = '''
-    CREATE TABLE IF NOT EXISTS cash_book(
-        id INTEGER PRIMARY KEY,
-        type TEXT,
-        amount REAL,
-        date TEXT,
-        note TEXT
-    )
-    '''
-
-    # apply backup & restore for each table
-    backup_and_restore_table(c, "applications", applications_expected, applications_create)
-    backup_and_restore_table(c, "expenses", expenses_expected, expenses_create)
-    backup_and_restore_table(c, "suppliers", suppliers_expected, suppliers_create)
-    backup_and_restore_table(c, "ledger", ledger_expected, ledger_create)
-    backup_and_restore_table(c, "services", services_expected, services_create)
-    backup_and_restore_table(c, "cash_book", cash_expected, cash_create)
-
-    # preload services if empty
-    c.execute("SELECT COUNT(*) FROM services")
-    cnt = c.fetchone()[0]
-    if cnt == 0:
-        for m,s,p,a in DEFAULT_SERVICES:
-            try:
-                c.execute("INSERT INTO services(main_category, sub_category, product_name, govt_amount) VALUES (?,?,?,?)", (m,s,p,a))
-            except:
-                pass
-
-    conn.commit()
-    conn.close()
-
-# ---------------- UTIL ----------------
+# ---------------- DB bootstrap ----------------
 def get_conn():
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     return conn
 
-def check_login(u, p):
-    conn = get_conn(); c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE username=? AND password=?", (u, p))
-    res = c.fetchone() is not None
+def init_db():
+    conn = get_conn()
+    c = conn.cursor()
+
+    # Users: username is the key (no numeric IDs)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY,
+            password_hash TEXT,
+            password_salt TEXT,
+            password TEXT
+        )
+    """)
+
+    # Create admin if missing (plain password for migration on first login)
+    c.execute("SELECT username FROM users WHERE username=?", (ADMIN_USERNAME,))
+    if c.fetchone() is None:
+        c.execute("INSERT INTO users(username, password) VALUES (?,?)", (ADMIN_USERNAME, ADMIN_PASSWORD))
+
+    # Services: name-only, unique
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS services (
+            service_name TEXT PRIMARY KEY,
+            govt_amount REAL
+        )
+    """)
+
+    # Suppliers (agents included here): name-only unique
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS suppliers (
+            supplier_name TEXT PRIMARY KEY,
+            contact TEXT,
+            type TEXT
+        )
+    """)
+
+    # Applications: no ID, use hidden rowid for edits/deletes
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS applications (
+            customer_name TEXT,
+            agent_name TEXT,
+            service_name TEXT,
+            govt_amount REAL,
+            charged_amount REAL,
+            payment_received REAL,
+            payment_pending REAL,
+            profit REAL,
+            payment_method TEXT,     -- CASH or BANK
+            created_at TEXT,
+            note TEXT
+        )
+    """)
+
+    # Ledger: per supplier (credit/debit)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS ledger (
+            supplier_name TEXT,
+            amount REAL,
+            credit_or_debit TEXT,    -- 'C' or 'D'
+            note TEXT,
+            date TEXT
+        )
+    """)
+
+    # Expenses
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS expenses (
+            category TEXT,
+            amount REAL,
+            date TEXT,
+            note TEXT
+        )
+    """)
+
+    # Cash book (manual adjustments if you want)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS cash_book (
+            type TEXT,               -- CASH or BANK
+            amount REAL,
+            date TEXT,
+            note TEXT
+        )
+    """)
+
+    # Opening balances (CASH/BANK)
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS opening_balances (
+            type TEXT,               -- CASH or BANK
+            amount REAL,
+            set_date TEXT
+        )
+    """)
+
+    # Preload default services if empty
+    c.execute("SELECT COUNT(*) AS n FROM services")
+    if c.fetchone()["n"] == 0:
+        for name, amt in DEFAULT_SERVICES:
+            try:
+                c.execute("INSERT INTO services(service_name, govt_amount) VALUES(?,?)", (name, amt))
+            except sqlite3.IntegrityError:
+                pass
+
+    conn.commit()
     conn.close()
-    return res
 
-# ---------------- backup download helper ----------------
-def make_backup_zip():
-    """Create an in-memory ZIP containing the DB and any *_backup.csv files."""
-    mem = io.BytesIO()
-    with zipfile.ZipFile(mem, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
-        # add DB
-        if os.path.exists(DB_PATH):
-            z.write(DB_PATH, arcname=os.path.basename(DB_PATH))
-        # add CSV backups if present
-        for fname in os.listdir("."):
-            if fname.endswith("_backup.csv"):
-                z.write(fname, arcname=fname)
-    mem.seek(0)
-    return mem.getvalue()
+# ---------------- Login helpers ----------------
+def migrate_or_verify_login(username, password):
+    conn = get_conn(); c = conn.cursor()
+    c.execute("SELECT * FROM users WHERE username=?", (username,))
+    row = c.fetchone()
+    if not row:
+        conn.close()
+        return False
 
-# ---------------- APP UI ----------------
-st.set_page_config(page_title="NANI ASSOCIATES", layout="wide")
+    # If hash exists, verify
+    if row["password_hash"]:
+        ok = verify_hash(password, row["password_salt"], row["password_hash"])
+        conn.close()
+        return ok
+
+    # Otherwise, compare plain (migrate if matches)
+    if row["password"] == password:
+        salt = gen_salt()
+        phash = hash_password(password, salt)
+        c.execute("UPDATE users SET password_hash=?, password_salt=?, password=NULL WHERE username=?",
+                  (phash, salt, username))
+        conn.commit(); conn.close()
+        return True
+
+    conn.close()
+    return False
+
+# ---------------- Backups ----------------
+def ensure_dir(p):
+    if not os.path.exists(p):
+        os.makedirs(p, exist_ok=True)
+
+def auto_daily_backup():
+    """Create a dated copy of the DB once per day into backups/"""
+    try:
+        ensure_dir(BACKUP_DIR)
+        today = date.today().isoformat()
+        dst = os.path.join(BACKUP_DIR, f"{today}_nani_associates.db")
+        if not os.path.exists(dst) and os.path.exists(DB_PATH):
+            shutil.copyfile(DB_PATH, dst)
+            return dst
+    except Exception as e:
+        print("Auto-backup failed:", e)
+    return None
+
+def get_db_bytes():
+    with open(DB_PATH, "rb") as f:
+        return f.read()
+
+# ---------------- App start ----------------
+st.set_page_config(page_title=APP_TITLE, layout="wide")
 init_db()
+auto_file = auto_daily_backup()
 
-# session login
-if 'logged_in' not in st.session_state:
+# ---------------- Login ----------------
+if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
 if not st.session_state.logged_in:
-    st.title("NANI ASSOCIATES - Admin Login")
+    st.title(f"{APP_TITLE} — Admin Login")
     with st.form("login"):
-        u = st.text_input("Username")
+        u = st.text_input("Username", value=ADMIN_USERNAME)
         p = st.text_input("Password", type="password")
-        s = st.form_submit_button("Login")
-    if s:
-        if check_login(u, p):
+        ok = st.form_submit_button("Login")
+    if ok:
+        if migrate_or_verify_login(u, p):
             st.session_state.logged_in = True
-            st.experimental_rerun()
+            safe_rerun()
         else:
-            st.error("Invalid credentials")
+            st.error("Invalid credentials.")
     st.stop()
 
-# open DB connection for use
+# ---------------- Open DB for main UI ----------------
 conn = get_conn()
 c = conn.cursor()
 
-# Build service labels safely (no //)
-services_rows = c.execute("SELECT * FROM services ORDER BY main_category, sub_category, product_name").fetchall()
-service_labels = []
-service_map = {}
-for r in services_rows:
-    parts = [p for p in (r["main_category"], r["sub_category"], r["product_name"]) if p and str(p).strip() != ""]
-    label = " / ".join(parts)
-    if label.strip()=="":
-        label = f"Service {r['id']}"
-    service_labels.append(label)
-    service_map[label] = r
+# Sidebar
+menu = st.sidebar.selectbox(
+    "Menu",
+    ["Dashboard", "Service Master", "Service Entry", "Suppliers & Ledger", "Expenses", "Cash Book", "Reports", "Settings", "Logout"]
+)
 
-# fixed sidebar
-menu_items = ["Dashboard", "Services Master", "Service Entry", "Suppliers & Ledger", "Expenses", "Cash Book", "Reports", "Settings", "Logout"]
-choice = st.sidebar.selectbox("Menu", menu_items)
-
-# helpers for date ranges
-def quick_range(kind):
-    today = date.today()
+# Utility: Quick ranges
+def quick_range(kind: str):
+    t = date.today()
     if kind == "Today":
-        return today, today
+        return t, t
     if kind == "This Week":
-        start = today - timedelta(days=today.weekday())
-        return start, today
+        start = t - timedelta(days=t.weekday())
+        return start, t
     if kind == "This Month":
-        start = today.replace(day=1)
-        return start, today
-    return today, today
+        start = t.replace(day=1)
+        return start, t
+    if kind == "Last 7 Days":
+        return t - timedelta(days=6), t
+    return t, t
 
-# ---------------- DASHBOARD ----------------
-if choice == "Dashboard":
+# ---------------- Dashboard ----------------
+if menu == "Dashboard":
     st.title("Dashboard")
-    col_a, col_b, col_c = st.columns(3)
-    with col_a:
-        quick = st.selectbox("Quick range", ["Today", "This Week", "This Month", "Custom"])
-    if quick != "Custom":
-        from_date, to_date = quick_range(quick)
-    else:
-        from_date = st.date_input("From", value=date.today() - timedelta(days=7))
-        to_date = st.date_input("To", value=date.today())
-    svc_filter = st.selectbox("Service filter", ["All"] + service_labels)
-    name_filter = st.text_input("Customer / Agent name (optional)")
 
-    # fetch applications
-    if svc_filter == "All":
-        apps_df = pd.read_sql_query("SELECT * FROM applications WHERE date(created_at) BETWEEN ? AND ?", conn, params=(from_date.isoformat(), to_date.isoformat()))
-    else:
-        srow = service_map[svc_filter]
-        apps_df = pd.read_sql_query("SELECT * FROM applications WHERE service_id=? AND date(created_at) BETWEEN ? AND ?", conn, params=(srow["id"], from_date.isoformat(), to_date.isoformat()))
-    if name_filter:
-        apps_df = apps_df[apps_df['customer_name'].str.contains(name_filter, case=False, na=False) | apps_df['agent_name'].str.contains(name_filter, case=False, na=False)]
+    with st.expander("Filters", expanded=True):
+        col1, col2, col3 = st.columns([1,1,2])
+        quick = col1.selectbox("Quick", ["Today", "This Week", "This Month", "Last 7 Days", "Custom"], index=0)
+        if quick == "Custom":
+            from_d = col1.date_input("From", value=date.today() - timedelta(days=7))
+            to_d = col2.date_input("To", value=date.today())
+        else:
+            from_d, to_d = quick_range(quick)
+        # Service & Name filters
+        services = pd.read_sql_query("SELECT service_name FROM services ORDER BY service_name", conn)["service_name"].tolist()
+        sel_service = col3.selectbox("Service", ["All"] + services)
+        text_filter = st.text_input("Customer / Agent (optional)")
 
-    exp_df = pd.read_sql_query("SELECT * FROM expenses WHERE date(date) BETWEEN ? AND ?", conn, params=(from_date.isoformat(), to_date.isoformat()))
-    ledger_df = pd.read_sql_query("SELECT * FROM ledger WHERE date(date) BETWEEN ? AND ?", conn, params=(from_date.isoformat(), to_date.isoformat()))
-    cash_df = pd.read_sql_query("SELECT * FROM cash_book WHERE date(date) BETWEEN ? AND ?", conn, params=(from_date.isoformat(), to_date.isoformat()))
+    # Load data
+    apps = pd.read_sql_query(
+        "SELECT rowid, * FROM applications WHERE date(created_at) BETWEEN ? AND ?",
+        conn, params=(from_d.isoformat(), to_d.isoformat())
+    )
+    if sel_service != "All":
+        apps = apps[apps["service_name"] == sel_service]
+    if text_filter:
+        mask = (
+            apps["customer_name"].fillna("").str.contains(text_filter, case=False) |
+            apps["agent_name"].fillna("").str.contains(text_filter, case=False)
+        )
+        apps = apps[mask]
 
-    total_income = apps_df['payment_received'].sum() if not apps_df.empty else 0.0
-    total_charged = apps_df['charged_amount'].sum() if not apps_df.empty else 0.0
-    total_profit_apps = apps_df['profit'].sum() if not apps_df.empty else 0.0
-    total_expenses = exp_df['amount'].sum() if not exp_df.empty else 0.0
-    ledger_debits = ledger_df[ledger_df['credit_or_debit']=='D']['amount'].sum() if not ledger_df.empty else 0.0
-    ledger_credits = ledger_df[ledger_df['credit_or_debit']=='C']['amount'].sum() if not ledger_df.empty else 0.0
+    expenses = pd.read_sql_query(
+        "SELECT rowid, * FROM expenses WHERE date(date) BETWEEN ? AND ?",
+        conn, params=(from_d.isoformat(), to_d.isoformat())
+    )
+    ledger = pd.read_sql_query(
+        "SELECT rowid, * FROM ledger WHERE date(date) BETWEEN ? AND ?",
+        conn, params=(from_d.isoformat(), to_d.isoformat())
+    )
+    cash_book = pd.read_sql_query(
+        "SELECT rowid, * FROM cash_book WHERE date(date) BETWEEN ? AND ?",
+        conn, params=(from_d.isoformat(), to_d.isoformat())
+    )
+    openings = pd.read_sql_query("SELECT * FROM opening_balances", conn)
 
-    apps_cash = apps_df[apps_df['payment_method']=='CASH']['payment_received'].sum() if not apps_df.empty else 0.0
-    apps_bank = apps_df[apps_df['payment_method']=='BANK']['payment_received'].sum() if not apps_df.empty else 0.0
-    cb_cash = cash_df[cash_df['type']=='CASH']['amount'].sum() if not cash_df.empty else 0.0
-    cb_bank = cash_df[cash_df['type']=='BANK']['amount'].sum() if not cash_df.empty else 0.0
+    # Metrics
+    total_income = apps["payment_received"].sum() if not apps.empty else 0.0
+    total_expenses = expenses["amount"].sum() if not expenses.empty else 0.0
+    total_profit = apps["profit"].sum() if not apps.empty else 0.0
 
-    cash_in_hand = apps_cash + cb_cash + ledger_credits - (total_expenses + ledger_debits)
-    cash_at_bank = apps_bank + cb_bank
+    apps_cash = apps[apps["payment_method"] == "CASH"]["payment_received"].sum() if not apps.empty else 0.0
+    apps_bank = apps[apps["payment_method"] == "BANK"]["payment_received"].sum() if not apps.empty else 0.0
 
-    # show metrics
-    m1, m2, m3, m4 = st.columns(4)
-    m1.metric("Applications", len(apps_df))
-    m2.metric("Income (received)", f"{total_income:.2f}")
-    m3.metric("Expenses", f"{total_expenses:.2f}")
-    m4.metric("Profit (calc)", f"{(total_income - total_expenses - ledger_debits + ledger_credits):.2f}")
+    open_cash = openings[openings["type"] == "CASH"]["amount"].sum() if not openings.empty else 0.0
+    open_bank = openings[openings["type"] == "BANK"]["amount"].sum() if not openings.empty else 0.0
 
-    st.markdown("### Cash balances (auto-calculated)")
-    c1, c2 = st.columns(2)
-    c1.info(f"Cash in Hand: {cash_in_hand:.2f}")
-    c2.info(f"Cash at Bank: {cash_at_bank:.2f}")
+    cb_cash = cash_book[cash_book["type"] == "CASH"]["amount"].sum() if not cash_book.empty else 0.0
+    cb_bank = cash_book[cash_book["type"] == "BANK"]["amount"].sum() if not cash_book.empty else 0.0
 
-    st.markdown("---")
+    ledger_debits = ledger[ledger["credit_or_debit"] == "D"]["amount"].sum() if not ledger.empty else 0.0
+    ledger_credits = ledger[ledger["credit_or_debit"] == "C"]["amount"].sum() if not ledger.empty else 0.0
+
+    cash_in_hand = open_cash + apps_cash + cb_cash + ledger_credits - (total_expenses + ledger_debits)
+    cash_at_bank = open_bank + apps_bank + cb_bank
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Applications", 0 if apps.empty else len(apps))
+    c2.metric("Income (received)", f"{total_income:.2f}")
+    c3.metric("Expenses", f"{total_expenses:.2f}")
+    c4.metric("Profit (from applications)", f"{total_profit:.2f}")
+
+    st.info(f"Cash in Hand: {cash_in_hand:.2f}   |   Cash at Bank: {cash_at_bank:.2f}")
+
+    # Quick trend (income vs expenses by date)
+    try:
+        inc = apps.groupby(apps["created_at"].str[:10])["payment_received"].sum().rename("income") if not apps.empty else pd.Series(dtype=float)
+        ex = expenses.groupby("date")["amount"].sum().rename("expense") if not expenses.empty else pd.Series(dtype=float)
+        trend = pd.concat([inc, ex], axis=1).fillna(0)
+        if not trend.empty:
+            st.line_chart(trend)
+    except Exception:
+        pass
+
     st.subheader("Applications")
-    st.dataframe(apps_df.sort_values("created_at", ascending=False).reset_index(drop=True))
+    st.dataframe(apps.sort_values("created_at", ascending=False).reset_index(drop=True))
 
     st.subheader("Expenses")
-    st.dataframe(exp_df)
+    st.dataframe(expenses)
 
-    st.subheader("Ledger")
-    st.dataframe(ledger_df)
+    st.subheader("Supplier Ledger")
+    st.dataframe(ledger)
 
-    st.subheader("Cash Book")
-    st.dataframe(cash_df)
-
-# ---------------- SERVICES MASTER ----------------
-elif choice == "Services Master":
-    st.title("Services Master")
-    st.subheader("Existing services")
-    svc_df = pd.read_sql_query("SELECT * FROM services ORDER BY main_category, sub_category, product_name", conn)
+# ---------------- Service Master ----------------
+elif menu == "Service Master":
+    st.title("Service Master (Name-only)")
+    svc_df = pd.read_sql_query("SELECT service_name, govt_amount FROM services ORDER BY service_name", conn)
     st.dataframe(svc_df)
-    st.subheader("Add new service")
-    with st.form("svc_add"):
-        main_cat = st.text_input("Main Category", value="SERVICE")
-        sub_cat = st.text_input("Sub Category", value="")
-        prod = st.text_input("Product Name")
-        gov = st.number_input("Govt Amount (0 = None)", value=0.0)
-        add = st.form_submit_button("Add Service")
-    if add:
-        try:
-            val = None if gov == 0 else float(gov)
-            c.execute("INSERT INTO services(main_category, sub_category, product_name, govt_amount) VALUES (?,?,?,?)",
-                      (main_cat, sub_cat, prod, val))
-            conn.commit()
-            st.success("Service added")
-            st.experimental_rerun()
-        except Exception as e:
-            st.error("Could not add service: " + str(e))
 
-    st.subheader("Edit / Delete service")
-    services = c.execute("SELECT * FROM services ORDER BY main_category, sub_category, product_name").fetchall()
-    if services:
-        map_edit = {f"{s['id']} - {s['main_category']} / {s['sub_category']} / {s['product_name']}": s['id'] for s in services}
-        sel = st.selectbox("Select service", list(map_edit.keys()))
-        sid = map_edit[sel]
-        rec = c.execute("SELECT * FROM services WHERE id=?", (sid,)).fetchone()
+    st.subheader("Add Service")
+    with st.form("svc_add"):
+        sname = st.text_input("Service Name").strip()
+        gamt = st.number_input("Govt Amount (leave 0 if not set)", value=0.0)
+        add = st.form_submit_button("Add")
+    if add:
+        if not sname:
+            st.error("Service name is required.")
+        else:
+            try:
+                c.execute("INSERT INTO services(service_name, govt_amount) VALUES(?,?)", (sname, None if gamt == 0 else float(gamt)))
+                conn.commit()
+                st.success("Service added.")
+                safe_rerun()
+            except sqlite3.IntegrityError:
+                st.error("Duplicate service name. Not added.")
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+    st.subheader("Edit / Delete Service")
+    all_services = pd.read_sql_query("SELECT service_name, govt_amount FROM services ORDER BY service_name", conn)
+    if not all_services.empty:
+        pick = st.selectbox("Select", all_services["service_name"].tolist())
+        row = all_services[all_services["service_name"] == pick].iloc[0]
         with st.form("svc_edit"):
-            emain = st.text_input("Main Category", value=rec["main_category"])
-            esub = st.text_input("Sub Category", value=rec["sub_category"])
-            eprod = st.text_input("Product Name", value=rec["product_name"])
-            egov = st.number_input("Govt Amount (0 = None)", value=rec["govt_amount"] if rec["govt_amount"] is not None else 0.0)
+            new_name = st.text_input("Service Name", value=row["service_name"])
+            new_amt = st.number_input("Govt Amount (0 for None)", value=float(row["govt_amount"] if pd.notna(row["govt_amount"]) else 0.0))
             action = st.selectbox("Action", ["Update", "Delete"])
             go = st.form_submit_button("Execute")
         if go:
             try:
                 if action == "Update":
-                    new_g = None if egov == 0 else float(egov)
-                    c.execute("UPDATE services SET main_category=?, sub_category=?, product_name=?, govt_amount=? WHERE id=?", (emain, esub, eprod, new_g, sid))
-                    conn.commit(); st.success("Service updated"); st.experimental_rerun()
+                    # If name changed, ensure no conflict
+                    if new_name != pick:
+                        c.execute("SELECT 1 FROM services WHERE service_name=?", (new_name,))
+                        if c.fetchone():
+                            st.error("Another service with this name already exists.")
+                        else:
+                            # Update references in applications too
+                            c.execute("UPDATE applications SET service_name=? WHERE service_name=?", (new_name, pick))
+                            c.execute("UPDATE services SET service_name=?, govt_amount=? WHERE service_name=?",
+                                      (new_name, None if new_amt == 0 else float(new_amt), pick))
+                            conn.commit()
+                            st.success("Updated.")
+                            safe_rerun()
+                    else:
+                        c.execute("UPDATE services SET govt_amount=? WHERE service_name=?",
+                                  (None if new_amt == 0 else float(new_amt), pick))
+                        conn.commit()
+                        st.success("Updated.")
+                        safe_rerun()
                 else:
-                    c.execute("DELETE FROM services WHERE id=?", (sid,))
-                    conn.commit(); st.success("Service deleted"); st.experimental_rerun()
+                    # On delete, keep applications history; just delete the master row
+                    c.execute("DELETE FROM services WHERE service_name=?", (pick,))
+                    conn.commit()
+                    st.success("Deleted.")
+                    safe_rerun()
             except Exception as e:
-                st.error("Error: " + str(e))
+                st.error(f"Error: {e}")
     else:
-        st.info("No services to edit")
+        st.info("No services yet.")
 
-# ---------------- SERVICE ENTRY ----------------
-elif choice == "Service Entry":
-    st.title("Create Application (Service Entry)")
-    services = c.execute("SELECT * FROM services ORDER BY main_category, sub_category, product_name").fetchall()
-    if not services:
-        st.warning("No services available. Add services in Services Master first.")
+# ---------------- Service Entry ----------------
+elif menu == "Service Entry":
+    st.title("Service Entry")
+
+    services = pd.read_sql_query("SELECT service_name, govt_amount FROM services ORDER BY service_name", conn)
+    if services.empty:
+        st.warning("Add services in Service Master first.")
     else:
-        opts = []
-        svc_map = {}
-        for s in services:
-            parts = [p for p in (s['main_category'], s['sub_category'], s['product_name']) if p and str(p).strip() != ""]
-            label = " / ".join(parts)
-            opts.append(label)
-            svc_map[label] = s
-        sel = st.selectbox("Select Service", opts)
-        srow = svc_map[sel]
-        gov = srow['govt_amount']
-        st.info(f"Govt amount (auto): {gov if gov is not None else 'MANUAL'}")
+        s = st.selectbox("Service", services["service_name"].tolist())
+        srow = services[services["service_name"] == s].iloc[0]
+        gov = None if pd.isna(srow["govt_amount"]) else float(srow["govt_amount"])
+        st.info(f"Govt Amount: {gov if gov is not None else 'MANUAL'}")
+
         with st.form("app_add"):
-            cname = st.text_input("Customer Name")
+            cname = st.text_input("Customer / Applicant Name")
+            agent = st.text_input("Supplier / Agent Name (optional)")
             charged = st.number_input("Charged Amount", value=float(gov) if gov else 0.0)
             received = st.number_input("Payment Received", value=0.0)
-            pmethod = st.selectbox("Payment Method", ["CASH","BANK"])
+            pmethod = st.selectbox("Payment Method", ["CASH", "BANK"])
             pending = charged - received
             profit = charged - (gov if gov else 0.0)
-            agent = st.text_input("Supplier / Agent (optional)")
             note = st.text_area("Note")
-            save_app = st.form_submit_button("Save Application")
-        if save_app:
+            save = st.form_submit_button("Save")
+        if save:
             try:
-                created = datetime.now().isoformat()
-                c.execute('''INSERT INTO applications(customer_name, service_id, service_name, govt_amount,
-                             charged_amount, payment_received, payment_pending, profit, payment_method, agent_name, created_at, note)
-                             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)''',
-                          (cname, srow['id'], srow['product_name'], gov, charged, received, pending, profit, pmethod, agent, created, note))
-                conn.commit(); st.success("Application saved")
+                now = datetime.now().isoformat()
+                c.execute("""INSERT INTO applications(customer_name, agent_name, service_name, govt_amount, charged_amount,
+                             payment_received, payment_pending, profit, payment_method, created_at, note)
+                             VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                          (cname, agent, s, gov, charged, received, pending, profit, pmethod, now, note))
+                conn.commit()
+                st.success("Application saved.")
             except Exception as e:
-                st.error("Error saving application: " + str(e))
+                st.error(f"Could not save: {e}")
 
-        st.markdown("#### Recent applications for this service")
-        dfsvc = pd.read_sql_query("SELECT * FROM applications WHERE service_id=? ORDER BY created_at DESC", conn, params=(srow['id'],))
-        # edit/delete per application
-        st.dataframe(dfsvc)
-        st.markdown("**Edit / Delete Application**")
-        apps = c.execute("SELECT * FROM applications ORDER BY created_at DESC").fetchall()
-        if apps:
-            app_map = {f"{a['id']} - {a['customer_name']} / {a['service_name']} / {a['created_at']}": a['id'] for a in apps}
-            selapp = st.selectbox("Select application to edit/delete", list(app_map.keys()))
-            aid = app_map[selapp]
-            row = c.execute("SELECT * FROM applications WHERE id=?", (aid,)).fetchone()
+        st.markdown("---")
+        st.subheader("Recent Applications")
+        rec = pd.read_sql_query("SELECT rowid, * FROM applications ORDER BY created_at DESC LIMIT 200", conn)
+        st.dataframe(rec)
+
+        st.subheader("Edit / Delete Application")
+        if not rec.empty:
+            sel = st.selectbox(
+                "Pick a record",
+                [f"{int(r['rowid'])} | {r['created_at']} | {r['customer_name']} | {r['service_name']}" for _, r in rec.iterrows()]
+            )
+            rowid = int(sel.split("|")[0].strip())
+            row = pd.read_sql_query("SELECT rowid, * FROM applications WHERE rowid=?", conn, params=(rowid,)).iloc[0]
             with st.form("app_edit"):
-                ncust = st.text_input("Customer Name", value=row["customer_name"])
-                ncharged = st.number_input("Charged Amount", value=row["charged_amount"])
-                nreceived = st.number_input("Payment Received", value=row["payment_received"])
-                npm = st.selectbox("Payment Method", ["CASH","BANK"], index=0 if row["payment_method"]=="CASH" else 1)
-                npending = ncharged - nreceived
-                nprofit = ncharged - (row["govt_amount"] if row["govt_amount"] else 0.0)
-                nagent = st.text_input("Agent", value=row["agent_name"] if row["agent_name"] else "")
-                nnote = st.text_area("Note", value=row["note"] if row["note"] else "")
+                nc = st.text_input("Customer / Applicant Name", value=row["customer_name"])
+                na = st.text_input("Supplier / Agent Name", value=row["agent_name"] or "")
+                # Service can be changed as well
+                ns = st.selectbox("Service", services["service_name"].tolist(), index=services["service_name"].tolist().index(row["service_name"]))
+                # Recompute government amount if changed
+                gov2 = services[services["service_name"] == ns]["govt_amount"].iloc[0]
+                gov2 = None if pd.isna(gov2) else float(gov2)
+                st.caption(f"Govt Amount for '{ns}': {gov2 if gov2 is not None else 'MANUAL'}")
+                ncharged = st.number_input("Charged Amount", value=float(row["charged_amount"]))
+                nreceived = st.number_input("Payment Received", value=float(row["payment_received"]))
+                npm = st.selectbox("Payment Method", ["CASH", "BANK"], index=0 if row["payment_method"] == "CASH" else 1)
+                npend = ncharged - nreceived
+                nprof = ncharged - (gov2 if gov2 else 0.0)
+                nnote = st.text_area("Note", value=row["note"] or "")
+                action = st.selectbox("Action", ["Update", "Delete"])
+                go = st.form_submit_button("Execute")
+            if go:
+                try:
+                    if action == "Update":
+                        c.execute("""UPDATE applications SET customer_name=?, agent_name=?, service_name=?, govt_amount=?,
+                                     charged_amount=?, payment_received=?, payment_pending=?, profit=?, payment_method=?, note=?
+                                     WHERE rowid=?""",
+                                  (nc, na, ns, gov2, ncharged, nreceived, npend, nprof, npm, nnote, rowid))
+                        conn.commit()
+                        st.success("Updated.")
+                        safe_rerun()
+                    else:
+                        c.execute("DELETE FROM applications WHERE rowid=?", (rowid,))
+                        conn.commit()
+                        st.success("Deleted.")
+                        safe_rerun()
+                except Exception as e:
+                    st.error(f"Error: {e}")
+        else:
+            st.info("No applications yet.")
+
+# ---------------- Suppliers & Ledger ----------------
+elif menu == "Suppliers & Ledger":
+    st.title("Suppliers & Ledger")
+
+    st.subheader("Suppliers (name-only)")
+    sup_df = pd.read_sql_query("SELECT supplier_name, contact, type FROM suppliers ORDER BY supplier_name", conn)
+    st.dataframe(sup_df)
+
+    with st.form("sup_add"):
+        sn = st.text_input("Supplier Name").strip()
+        sc = st.text_input("Contact")
+        stp = st.selectbox("Type", ["Aadhar Agent", "Birth Agent", "Other"])
+        add = st.form_submit_button("Add")
+    if add:
+        if not sn:
+            st.error("Supplier name is required.")
+        else:
+            try:
+                c.execute("INSERT INTO suppliers(supplier_name, contact, type) VALUES(?,?,?)", (sn, sc, stp))
+                conn.commit()
+                st.success("Supplier added.")
+                safe_rerun()
+            except sqlite3.IntegrityError:
+                st.error("Duplicate supplier name. Not added.")
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+    if not sup_df.empty:
+        st.subheader("Edit / Delete Supplier")
+        pick = st.selectbox("Select Supplier", pd.read_sql_query("SELECT supplier_name FROM suppliers ORDER BY supplier_name", conn)["supplier_name"].tolist())
+        row = pd.read_sql_query("SELECT * FROM suppliers WHERE supplier_name=?", conn, params=(pick,)).iloc[0]
+        with st.form("sup_edit"):
+            nname = st.text_input("Supplier Name", value=row["supplier_name"])
+            ncontact = st.text_input("Contact", value=row["contact"] or "")
+            ntype = st.selectbox("Type", ["Aadhar Agent", "Birth Agent", "Other"], index=["Aadhar Agent","Birth Agent","Other"].index(row["type"] or "Other"))
+            action = st.selectbox("Action", ["Update", "Delete"])
+            go = st.form_submit_button("Execute")
+        if go:
+            try:
+                if action == "Update":
+                    if nname != pick:
+                        # rename with conflict check
+                        c.execute("SELECT 1 FROM suppliers WHERE supplier_name=?", (nname,))
+                        if c.fetchone():
+                            st.error("Another supplier with this name already exists.")
+                        else:
+                            # Update ledger references
+                            c.execute("UPDATE ledger SET supplier_name=? WHERE supplier_name=?", (nname, pick))
+                            c.execute("UPDATE suppliers SET supplier_name=?, contact=?, type=? WHERE supplier_name=?",
+                                      (nname, ncontact, ntype, pick))
+                            conn.commit()
+                            st.success("Updated.")
+                            safe_rerun()
+                    else:
+                        c.execute("UPDATE suppliers SET contact=?, type=? WHERE supplier_name=?", (ncontact, ntype, pick))
+                        conn.commit()
+                        st.success("Updated.")
+                        safe_rerun()
+                else:
+                    # Deleting supplier does not delete ledger history
+                    c.execute("DELETE FROM suppliers WHERE supplier_name=?", (pick,))
+                    conn.commit()
+                    st.success("Deleted.")
+                    safe_rerun()
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+    st.markdown("---")
+    st.subheader("Ledger (per supplier)")
+
+    all_sups = pd.read_sql_query("SELECT supplier_name FROM suppliers ORDER BY supplier_name", conn)["supplier_name"].tolist()
+    if all_sups:
+        sel_sup = st.selectbox("Supplier", all_sups)
+        with st.form("led_add"):
+            amt = st.number_input("Amount", min_value=0.0, step=1.0)
+            ttype = st.selectbox("Type", ["D","C"])  # D=debit (you pay), C=credit (they paid you)
+            note = st.text_input("Note")
+            dte = st.date_input("Date", value=date.today())
+            addl = st.form_submit_button("Add Entry")
+        if addl:
+            try:
+                c.execute("INSERT INTO ledger(supplier_name, amount, credit_or_debit, note, date) VALUES(?,?,?,?,?)",
+                          (sel_sup, amt, ttype, note, dte.isoformat()))
+                conn.commit()
+                st.success("Ledger entry added.")
+                safe_rerun()
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+        ldf = pd.read_sql_query("SELECT rowid, * FROM ledger WHERE supplier_name=? ORDER BY date DESC, rowid DESC", conn, params=(sel_sup,))
+        st.dataframe(ldf)
+
+        credits = ldf[ldf["credit_or_debit"]=="C"]["amount"].sum() if not ldf.empty else 0.0
+        debits  = ldf[ldf["credit_or_debit"]=="D"]["amount"].sum() if not ldf.empty else 0.0
+        st.info(f"Balance (Credits - Debits): {credits - debits:.2f}")
+
+        if not ldf.empty:
+            st.subheader("Edit / Delete Ledger Entry")
+            pick_led = st.selectbox(
+                "Pick a ledger row",
+                [f"{int(r['rowid'])} | {r['date']} | {r['credit_or_debit']} | {r['amount']}" for _, r in ldf.iterrows()]
+            )
+            lid = int(pick_led.split("|")[0].strip())
+            r = pd.read_sql_query("SELECT rowid, * FROM ledger WHERE rowid=?", conn, params=(lid,)).iloc[0]
+            with st.form("led_edit"):
+                namt = st.number_input("Amount", value=float(r["amount"]))
+                ntt = st.selectbox("Type", ["D","C"], index=0 if r["credit_or_debit"]=="D" else 1)
+                nnt = st.text_input("Note", value=r["note"] or "")
+                nd = st.date_input("Date", value=date.fromisoformat(r["date"]))
                 act = st.selectbox("Action", ["Update", "Delete"])
                 go = st.form_submit_button("Execute")
             if go:
                 try:
                     if act == "Update":
-                        c.execute("""UPDATE applications SET customer_name=?, charged_amount=?, payment_received=?, payment_pending=?, profit=?, payment_method=?, agent_name=?, note=?
-                                     WHERE id=?""", (ncust, ncharged, nreceived, npending, nprofit, npm, nagent, nnote, aid))
-                        conn.commit(); st.success("Application updated"); st.experimental_rerun()
+                        c.execute("UPDATE ledger SET amount=?, credit_or_debit=?, note=?, date=? WHERE rowid=?",
+                                  (namt, ntt, nnt, nd.isoformat(), lid))
+                        conn.commit()
+                        st.success("Updated.")
+                        safe_rerun()
                     else:
-                        c.execute("DELETE FROM applications WHERE id=?", (aid,))
-                        conn.commit(); st.success("Deleted application"); st.experimental_rerun()
+                        c.execute("DELETE FROM ledger WHERE rowid=?", (lid,))
+                        conn.commit()
+                        st.success("Deleted.")
+                        safe_rerun()
                 except Exception as e:
-                    st.error("Error: " + str(e))
-        else:
-            st.info("No applications to edit")
-
-# ---------------- SUPPLIERS & LEDGER ----------------
-elif choice == "Suppliers & Ledger":
-    st.title("Suppliers & Ledger")
-    st.subheader("Add Supplier")
-    with st.form("supp_add"):
-        sname = st.text_input("Name")
-        scontact = st.text_input("Contact")
-        stype = st.selectbox("Type", ["Aadhar Agent","Birth Agent","Other"])
-        add_s = st.form_submit_button("Add Supplier")
-    if add_s:
-        try:
-            c.execute("INSERT INTO suppliers(name, contact, type) VALUES (?,?,?)", (sname, scontact, stype))
-            conn.commit(); st.success("Supplier added"); st.experimental_rerun()
-        except Exception as e:
-            st.error("Could not add supplier: " + str(e))
-
-    st.subheader("Add Ledger Entry")
-    supps = c.execute("SELECT * FROM suppliers ORDER BY name").fetchall()
-    if supps:
-        map_s = {f"{s['id']} - {s['name']}": s['id'] for s in supps}
-        sel = st.selectbox("Select supplier", list(map_s.keys()))
-        sid = map_s[sel]
-        with st.form("ledger_add"):
-            lamt = st.number_input("Amount")
-            lcd = st.selectbox("Credit or Debit", ["D","C"])  # D = we paid (debit), C = received (credit)
-            lnote = st.text_input("Note")
-            ldate = st.date_input("Date", value=date.today())
-            addl = st.form_submit_button("Add Ledger")
-        if addl:
-            try:
-                c.execute("INSERT INTO ledger(supplier_id, amount, credit_or_debit, note, date) VALUES (?,?,?,?,?)", (sid, lamt, lcd, lnote, ldate.isoformat()))
-                conn.commit(); st.success("Ledger added"); st.experimental_rerun()
-            except Exception as e:
-                st.error("Could not add ledger: " + str(e))
-        # show ledger and supplier balance
-        ledger_df = pd.read_sql_query("SELECT l.*, s.name as supplier_name FROM ledger l LEFT JOIN suppliers s ON l.supplier_id=s.id WHERE supplier_id=? ORDER BY date DESC", conn, params=(sid,))
-        st.dataframe(ledger_df)
-        # balance: credits minus debits (from supplier perspective: if D - we paid => negative balance)
-        credits = ledger_df[ledger_df['credit_or_debit']=='C']['amount'].sum() if not ledger_df.empty else 0.0
-        debits = ledger_df[ledger_df['credit_or_debit']=='D']['amount'].sum() if not ledger_df.empty else 0.0
-        st.info(f"Supplier Balance (credits - debits): {credits - debits:.2f}")
-        # allow edit/delete ledger entries
-        st.markdown("#### Edit/Delete Ledger Entry")
-        all_led = c.execute("SELECT * FROM ledger WHERE supplier_id=? ORDER BY date DESC", (sid,)).fetchall()
-        if all_led:
-            map_led = {f"{l['id']} - {l['date']} / {l['credit_or_debit']} / {l['amount']}": l['id'] for l in all_led}
-            selled = st.selectbox("Select ledger entry", list(map_led.keys()))
-            lid = map_led[selled]
-            row = c.execute("SELECT * FROM ledger WHERE id=?", (lid,)).fetchone()
-            with st.form("led_edit"):
-                lamt2 = st.number_input("Amount", value=row['amount'])
-                lcd2 = st.selectbox("Type", ["D","C"], index=0 if row['credit_or_debit']=="D" else 1)
-                lnote2 = st.text_input("Note", value=row['note'])
-                ldate2 = st.date_input("Date", value=date.fromisoformat(row['date']))
-                act2 = st.selectbox("Action", ["Update","Delete"])
-                go2 = st.form_submit_button("Execute")
-            if go2:
-                try:
-                    if act2 == "Update":
-                        c.execute("UPDATE ledger SET amount=?, credit_or_debit=?, note=?, date=? WHERE id=?", (lamt2, lcd2, lnote2, ldate2.isoformat(), lid))
-                        conn.commit(); st.success("Updated"); st.experimental_rerun()
-                    else:
-                        c.execute("DELETE FROM ledger WHERE id=?", (lid,)); conn.commit(); st.success("Deleted"); st.experimental_rerun()
-                except Exception as e:
-                    st.error("Error: " + str(e))
-        else:
-            st.info("No ledger entries for this supplier")
+                    st.error(f"Error: {e}")
     else:
-        st.info("No suppliers yet. Add one above.")
+        st.info("Add suppliers first.")
 
-# ---------------- EXPENSES ----------------
-elif choice == "Expenses":
+# ---------------- Expenses ----------------
+elif menu == "Expenses":
     st.title("Expenses")
-    with st.form("exp_add"):
-        ecat = st.selectbox("Category", ["Office Rent","Power Bill","Water Bill","Computer Repair","Machinery Repair","Staff Salary","Food Expenses","Other"])
-        eamt = st.number_input("Amount")
-        edate = st.date_input("Date", value=date.today())
-        enote = st.text_area("Note")
-        add_e = st.form_submit_button("Add Expense")
-    if add_e:
-        try:
-            c.execute("INSERT INTO expenses(category, amount, date, note) VALUES (?,?,?,?)", (ecat, eamt, edate.isoformat(), enote))
-            conn.commit(); st.success("Expense added"); st.experimental_rerun()
-        except Exception as e:
-            st.error("Could not add expense: " + str(e))
-    st.subheader("All expenses")
-    edf = pd.read_sql_query("SELECT * FROM expenses ORDER BY date DESC", conn)
-    st.dataframe(edf)
-    st.markdown("#### Edit / Delete Expense")
-    exs = c.execute("SELECT * FROM expenses ORDER BY date DESC").fetchall()
-    if exs:
-        map_e = {f"{e['id']} - {e['date']} / {e['category']} / {e['amount']}": e['id'] for e in exs}
-        sel_e = st.selectbox("Select expense", list(map_e.keys()))
-        eid = map_e[sel_e]
-        erow = c.execute("SELECT * FROM expenses WHERE id=?", (eid,)).fetchone()
-        with st.form("exp_edit"):
-            ecat2 = st.selectbox("Category", ["Office Rent","Power Bill","Water Bill","Computer Repair","Machinery Repair","Staff Salary","Food Expenses","Other"], index=0)
-            eamt2 = st.number_input("Amount", value=erow['amount'])
-            edate2 = st.date_input("Date", value=date.fromisoformat(erow['date']))
-            enote2 = st.text_area("Note", value=erow['note'] if erow['note'] else "")
-            acte = st.selectbox("Action", ["Update","Delete"])
-            goe = st.form_submit_button("Execute")
-        if goe:
-            try:
-                if acte == "Update":
-                    c.execute("UPDATE expenses SET category=?, amount=?, date=?, note=? WHERE id=?", (ecat2, eamt2, edate2.isoformat(), enote2, eid))
-                    conn.commit(); st.success("Updated"); st.experimental_rerun()
-                else:
-                    c.execute("DELETE FROM expenses WHERE id=?", (eid,)); conn.commit(); st.success("Deleted"); st.experimental_rerun()
-            except Exception as e:
-                st.error("Error: " + str(e))
-    else:
-        st.info("No expenses yet")
 
-# ---------------- CASH BOOK ----------------
-elif choice == "Cash Book":
+    with st.form("exp_add"):
+        cat = st.selectbox("Category", ["Office Rent","Power Bill","Water Bill","Computer Repair","Machinery Repair","Staff Salary","Food Expenses","Other"])
+        amt = st.number_input("Amount", min_value=0.0, step=1.0)
+        dt = st.date_input("Date", value=date.today())
+        note = st.text_area("Note")
+        add = st.form_submit_button("Add Expense")
+    if add:
+        try:
+            c.execute("INSERT INTO expenses(category, amount, date, note) VALUES(?,?,?,?)", (cat, amt, dt.isoformat(), note))
+            conn.commit()
+            st.success("Expense added.")
+            safe_rerun()
+        except Exception as e:
+            st.error(f"Error: {e}")
+
+    edf = pd.read_sql_query("SELECT rowid, * FROM expenses ORDER BY date DESC, rowid DESC", conn)
+    st.dataframe(edf)
+
+    if not edf.empty:
+        st.subheader("Edit / Delete Expense")
+        sel = st.selectbox(
+            "Pick expense",
+            [f"{int(r['rowid'])} | {r['date']} | {r['category']} | {r['amount']}" for _, r in edf.iterrows()]
+        )
+        rid = int(sel.split("|")[0].strip())
+        r = pd.read_sql_query("SELECT rowid, * FROM expenses WHERE rowid=?", conn, params=(rid,)).iloc[0]
+        with st.form("exp_edit"):
+            ecat = st.selectbox("Category", ["Office Rent","Power Bill","Water Bill","Computer Repair","Machinery Repair","Staff Salary","Food Expenses","Other"], index=0)
+            eamt = st.number_input("Amount", value=float(r["amount"]))
+            edate = st.date_input("Date", value=date.fromisoformat(r["date"]))
+            enote = st.text_area("Note", value=r["note"] or "")
+            act = st.selectbox("Action", ["Update","Delete"])
+            go = st.form_submit_button("Execute")
+        if go:
+            try:
+                if act == "Update":
+                    c.execute("UPDATE expenses SET category=?, amount=?, date=?, note=? WHERE rowid=?", (ecat, eamt, edate.isoformat(), enote, rid))
+                    conn.commit()
+                    st.success("Updated.")
+                    safe_rerun()
+                else:
+                    c.execute("DELETE FROM expenses WHERE rowid=?", (rid,))
+                    conn.commit()
+                    st.success("Deleted.")
+                    safe_rerun()
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+# ---------------- Cash Book ----------------
+elif menu == "Cash Book":
     st.title("Cash Book (manual adjustments)")
     with st.form("cash_add"):
-        ttype = st.selectbox("Type", ["CASH","BANK"])
-        camt = st.number_input("Amount")
-        cdate = st.date_input("Date", value=date.today())
-        cnote = st.text_area("Note")
-        addc = st.form_submit_button("Record")
-    if addc:
+        t = st.selectbox("Type", ["CASH","BANK"])
+        amt = st.number_input("Amount", min_value=0.0, step=1.0)
+        dt = st.date_input("Date", value=date.today())
+        note = st.text_area("Note")
+        add = st.form_submit_button("Record")
+    if add:
         try:
-            c.execute("INSERT INTO cash_book(type, amount, date, note) VALUES (?,?,?,?)", (ttype, camt, cdate.isoformat(), cnote))
-            conn.commit(); st.success("Recorded"); st.experimental_rerun()
+            c.execute("INSERT INTO cash_book(type, amount, date, note) VALUES(?,?,?,?)", (t, amt, dt.isoformat(), note))
+            conn.commit()
+            st.success("Recorded.")
+            safe_rerun()
         except Exception as e:
-            st.error("Could not record: " + str(e))
-    st.subheader("All cashbook entries")
-    cb = pd.read_sql_query("SELECT * FROM cash_book ORDER BY date DESC", conn)
+            st.error(f"Error: {e}")
+
+    cb = pd.read_sql_query("SELECT rowid, * FROM cash_book ORDER BY date DESC, rowid DESC", conn)
     st.dataframe(cb)
 
-# ---------------- REPORTS ----------------
-elif choice == "Reports":
+# ---------------- Reports ----------------
+elif menu == "Reports":
     st.title("Reports")
-    rfrom = st.date_input("From", value=date.today() - timedelta(days=7))
-    rto = st.date_input("To", value=date.today())
-    sfilter = st.selectbox("Service filter", ["All"] + service_labels)
-    if sfilter == "All":
-        rdf = pd.read_sql_query("SELECT * FROM applications WHERE date(created_at) BETWEEN ? AND ?", conn, params=(rfrom.isoformat(), rto.isoformat()))
+
+    col1, col2, col3 = st.columns(3)
+    f = col1.date_input("From", value=date.today() - timedelta(days=7))
+    t = col2.date_input("To", value=date.today())
+    services = pd.read_sql_query("SELECT service_name FROM services ORDER BY service_name", conn)["service_name"].tolist()
+    sel_service = col3.selectbox("Service", ["All"] + services)
+
+    if sel_service == "All":
+        rdf = pd.read_sql_query("SELECT rowid, * FROM applications WHERE date(created_at) BETWEEN ? AND ? ORDER BY created_at DESC",
+                                conn, params=(f.isoformat(), t.isoformat()))
     else:
-        s = service_map[sfilter]
-        rdf = pd.read_sql_query("SELECT * FROM applications WHERE service_id=? AND date(created_at) BETWEEN ? AND ?", conn, params=(s['id'], rfrom.isoformat(), rto.isoformat()))
+        rdf = pd.read_sql_query("""SELECT rowid, * FROM applications WHERE service_name=? AND date(created_at) BETWEEN ? AND ?
+                                   ORDER BY created_at DESC""",
+                                conn, params=(sel_service, f.isoformat(), t.isoformat()))
+    st.subheader("Applications")
     st.dataframe(rdf)
-    csv_bytes = rdf.to_csv(index=False).encode()
-    st.download_button("Download Applications CSV", csv_bytes, file_name=f"applications_{rfrom}_{rto}.csv")
-    expd = pd.read_sql_query("SELECT * FROM expenses WHERE date(date) BETWEEN ? AND ?", conn, params=(rfrom.isoformat(), rto.isoformat()))
+    st.download_button("Download Applications CSV", rdf.to_csv(index=False).encode(), file_name=f"applications_{f}_{t}.csv")
+
+    edf = pd.read_sql_query("SELECT rowid, * FROM expenses WHERE date(date) BETWEEN ? AND ? ORDER BY date DESC", conn, params=(f.isoformat(), t.isoformat()))
     st.subheader("Expenses")
-    st.dataframe(expd)
-    st.download_button("Download Expenses CSV", expd.to_csv(index=False).encode(), file_name=f"expenses_{rfrom}_{rto}.csv")
+    st.dataframe(edf)
+    st.download_button("Download Expenses CSV", edf.to_csv(index=False).encode(), file_name=f"expenses_{f}_{t}.csv")
 
-# ---------------- SETTINGS ----------------
-elif choice == "Settings":
+    # Pending report
+    st.subheader("Pending / Partially Pending Applications")
+    pending_df = rdf[rdf["payment_pending"] > 0] if not rdf.empty else pd.DataFrame(columns=rdf.columns if not rdf.empty else [])
+    st.dataframe(pending_df)
+
+# ---------------- Settings ----------------
+elif menu == "Settings":
     st.title("Settings & Maintenance")
-    st.write("Admin user:", ADMIN_USERNAME)
-    st.markdown("**Database & backups**")
-    if st.button("Create on-demand backup (ZIP)"):
+
+    st.subheader("Admin Account")
+    st.write("Username:", ADMIN_USERNAME)
+    st.caption("Password is stored securely (hashed). If the database had a plain password, it is migrated automatically on first successful login.")
+
+    st.subheader("Opening Balances")
+    ob = pd.read_sql_query("SELECT rowid, * FROM opening_balances", conn)
+    st.dataframe(ob)
+    with st.form("ob_add"):
+        typ = st.selectbox("Type", ["CASH","BANK"])
+        amt = st.number_input("Amount", min_value=0.0, step=1.0)
+        dt = st.date_input("Set Date", value=date.today())
+        add = st.form_submit_button("Add Opening Balance")
+    if add:
         try:
-            blob = make_backup_zip()
-            st.download_button("Download backup ZIP", blob, file_name=f"nani_backup_{date.today().isoformat()}.zip")
+            c.execute("INSERT INTO opening_balances(type, amount, set_date) VALUES(?,?,?)", (typ, amt, dt.isoformat()))
+            conn.commit()
+            st.success("Opening balance added.")
+            safe_rerun()
         except Exception as e:
-            st.error("Could not create backup: " + str(e))
-    st.write("Note: When schema mismatch occurs, CSV backups are auto-exported in the app folder with names like applications_backup.csv")
+            st.error(f"Error: {e}")
+
     st.markdown("---")
-    st.subheader("Re-run DB init (safe)")
-    if st.button("Run init_db()"):
-        try:
-            init_db()
-            st.success("init_db() executed (check *_backup.csv files if any schema mismatch occurred).")
-        except Exception as e:
-            st.error("Error running init_db(): " + str(e))
+    st.subheader("Backups")
 
-# ---------------- LOGOUT ----------------
-elif choice == "Logout":
+    if auto_file:
+        st.success(f"Auto daily backup created: {auto_file}")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        if os.path.exists(DB_PATH):
+            st.download_button("Download Current Database (.db)", get_db_bytes(), file_name=os.path.basename(DB_PATH))
+    with col2:
+        # On-demand ZIP (DB + CSV backups if any)
+        if st.button("Create & Download ZIP Backup"):
+            try:
+                mem = io.BytesIO()
+                with zipfile.ZipFile(mem, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
+                    if os.path.exists(DB_PATH):
+                        z.write(DB_PATH, arcname=os.path.basename(DB_PATH))
+                    # Include any *_backup.csv files if you ever add schema migrations
+                    for fname in os.listdir("."):
+                        if fname.endswith("_backup.csv"):
+                            z.write(fname, arcname=fname)
+                mem.seek(0)
+                st.download_button("Download ZIP Backup", mem.read(), file_name=f"nani_backup_{date.today().isoformat()}.zip")
+            except Exception as e:
+                st.error(f"Backup failed: {e}")
+
+# ---------------- Logout ----------------
+elif menu == "Logout":
     st.session_state.logged_in = False
-    # safe rerun
-    st.experimental_rerun()
+    safe_rerun()
 
-# close DB at end
+# Close DB at end
 conn.close()
