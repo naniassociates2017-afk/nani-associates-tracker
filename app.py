@@ -46,9 +46,6 @@ FILES = {
     "cash": DATA_FOLDER / "cash.csv",
 }
 
-# -----------------------------
-# Helper functions
-# -----------------------------
 def load_csv(file, cols):
     if file.exists():
         df = pd.read_csv(file)
