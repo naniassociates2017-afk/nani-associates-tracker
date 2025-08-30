@@ -1,4 +1,55 @@
-def init_applications(c):
+import sqlite3, os, csv, datetime
+
+def backup_and_restore_table(c, table_name, expected_columns, create_sql):
+    """Back up old table data, drop table, recreate with correct schema, and restore."""
+    # Check if table exists
+    c.execute("SELECT name FROM sqlite_master WHERE type='table' AND name=?", (table_name,))
+    if c.fetchone():
+        # Compare schema
+        c.execute(f"PRAGMA table_info({table_name})")
+        existing_cols = [row[1] for row in c.fetchall()]
+        if existing_cols != expected_columns:
+            # Backup
+            c.execute(f"SELECT * FROM {table_name}")
+            rows = c.fetchall()
+            if rows:
+                backup_file = f"{table_name}_backup.csv"
+                with open(backup_file, "w", newline="", encoding="utf-8") as f:
+                    writer = csv.writer(f)
+                    writer.writerow(existing_cols)
+                    writer.writerows(rows)
+                print(f"⚠️ {table_name}: Schema mismatch, old data saved to {backup_file}")
+
+            # Drop old table
+            c.execute(f"DROP TABLE {table_name}")
+
+    # Create correct schema
+    c.execute(create_sql)
+
+    # Restore if backup exists
+    backup_file = f"{table_name}_backup.csv"
+    if os.path.exists(backup_file):
+        with open(backup_file, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            restored = 0
+            for row in reader:
+                # Map available fields safely
+                data = [row.get(col, None) for col in expected_columns]
+                try:
+                    placeholders = ",".join("?" * len(expected_columns))
+                    c.execute(f"INSERT INTO {table_name}({','.join(expected_columns)}) VALUES ({placeholders})", data)
+                    restored += 1
+                except Exception as e:
+                    print(f"⚠️ Could not restore row in {table_name}:", row, e)
+            if restored > 0:
+                print(f"✅ {restored} records restored into {table_name}")
+
+
+def init_db():
+    conn = sqlite3.connect("nani_associates.db")
+    c = conn.cursor()
+
+    # Applications
     backup_and_restore_table(
         c,
         "applications",
@@ -19,7 +70,7 @@ def init_applications(c):
         )'''
     )
 
-def init_expenses(c):
+    # Expenses
     backup_and_restore_table(
         c,
         "expenses",
@@ -32,7 +83,7 @@ def init_expenses(c):
         )'''
     )
 
-def init_suppliers(c):
+    # Suppliers
     backup_and_restore_table(
         c,
         "suppliers",
@@ -44,7 +95,7 @@ def init_suppliers(c):
         )'''
     )
 
-def init_ledger(c):
+    # Ledger
     backup_and_restore_table(
         c,
         "ledger",
@@ -60,7 +111,7 @@ def init_ledger(c):
         )'''
     )
 
-def init_services(c):
+    # Services
     backup_and_restore_table(
         c,
         "services",
@@ -74,13 +125,5 @@ def init_services(c):
         )'''
     )
 
-def init_db():
-    conn = sqlite3.connect("nani_associates.db")
-    c = conn.cursor()
-    init_applications(c)
-    init_expenses(c)
-    init_suppliers(c)
-    init_ledger(c)
-    init_services(c)
     conn.commit()
     conn.close()
