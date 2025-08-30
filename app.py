@@ -1,4 +1,4 @@
-# app.py — NANI ASSOCIATES (single file)
+# app.py — NANI ASSOCIATES (fixed robust login migration)
 # Run: pip install streamlit pandas
 #      streamlit run app.py
 
@@ -116,7 +116,7 @@ def init_db():
             payment_received REAL,
             payment_pending REAL,
             profit REAL,
-            payment_method TEXT,     -- CASH or BANK
+            payment_method TEXT,
             created_at TEXT,
             note TEXT
         )
@@ -127,7 +127,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS ledger (
             supplier_name TEXT,
             amount REAL,
-            credit_or_debit TEXT,    -- 'C' or 'D'
+            credit_or_debit TEXT,
             note TEXT,
             date TEXT
         )
@@ -146,7 +146,7 @@ def init_db():
     # Cash book (manual adjustments if you want)
     c.execute("""
         CREATE TABLE IF NOT EXISTS cash_book (
-            type TEXT,               -- CASH or BANK
+            type TEXT,
             amount REAL,
             date TEXT,
             note TEXT
@@ -156,7 +156,7 @@ def init_db():
     # Opening balances (CASH/BANK)
     c.execute("""
         CREATE TABLE IF NOT EXISTS opening_balances (
-            type TEXT,               -- CASH or BANK
+            type TEXT,
             amount REAL,
             set_date TEXT
         )
@@ -174,32 +174,64 @@ def init_db():
     conn.commit()
     conn.close()
 
-# ---------------- Login helpers ----------------
+# ---------------- Login: robust migration & verify ----------------
 def migrate_or_verify_login(username, password):
+    """
+    Robust login:
+    - If hashed columns exist and are populated -> verify via hash
+    - Else if plain password column exists and matches -> migrate to hashed columns (if possible) and return True
+    - Otherwise return False
+    The function carefully checks presence of keys and catches exceptions.
+    """
     conn = get_conn(); c = conn.cursor()
-    c.execute("SELECT * FROM users WHERE username=?", (username,))
-    row = c.fetchone()
-    if not row:
-        conn.close()
+    try:
+        c.execute("SELECT * FROM users WHERE username=?", (username,))
+        row = c.fetchone()
+        if not row:
+            return False
+
+        # check available columns safely
+        keys = []
+        try:
+            # sqlite3.Row supports keys()
+            keys = list(row.keys())
+        except Exception:
+            pass
+
+        # If password_hash column exists and has a value, verify via hash
+        if "password_hash" in keys and row["password_hash"]:
+            # ensure salt exists (if not, fail safe)
+            salt = row["password_salt"] if "password_salt" in keys and row["password_salt"] else ""
+            ok = False
+            try:
+                ok = verify_hash(password, salt, row["password_hash"])
+            except Exception:
+                ok = False
+            return ok
+
+        # Else fallback: check plain password column
+        if "password" in keys and row["password"]:
+            if row["password"] == password:
+                # Attempt to migrate: only if the columns exist (they do in init_db)
+                try:
+                    salt = gen_salt()
+                    phash = hash_password(password, salt)
+                    # update hashed columns and clear plaintext password
+                    c.execute("UPDATE users SET password_hash=?, password_salt=?, password=NULL WHERE username=?", (phash, salt, username))
+                    conn.commit()
+                except Exception:
+                    # migration failed, but login allowed
+                    pass
+                return True
+
+        # No valid auth method
         return False
-
-    # If hash exists, verify
-    if row["password_hash"]:
-        ok = verify_hash(password, row["password_salt"], row["password_hash"])
+    except Exception as e:
+        print("migrate_or_verify_login error:", e)
+        traceback.print_exc()
+        return False
+    finally:
         conn.close()
-        return ok
-
-    # Otherwise, compare plain (migrate if matches)
-    if row["password"] == password:
-        salt = gen_salt()
-        phash = hash_password(password, salt)
-        c.execute("UPDATE users SET password_hash=?, password_salt=?, password=NULL WHERE username=?",
-                  (phash, salt, username))
-        conn.commit(); conn.close()
-        return True
-
-    conn.close()
-    return False
 
 # ---------------- Backups ----------------
 def ensure_dir(p):
@@ -421,7 +453,6 @@ elif menu == "Service Master":
                         st.success("Updated.")
                         safe_rerun()
                 else:
-                    # On delete, keep applications history; just delete the master row
                     c.execute("DELETE FROM services WHERE service_name=?", (pick,))
                     conn.commit()
                     st.success("Deleted.")
@@ -482,9 +513,7 @@ elif menu == "Service Entry":
             with st.form("app_edit"):
                 nc = st.text_input("Customer / Applicant Name", value=row["customer_name"])
                 na = st.text_input("Supplier / Agent Name", value=row["agent_name"] or "")
-                # Service can be changed as well
                 ns = st.selectbox("Service", services["service_name"].tolist(), index=services["service_name"].tolist().index(row["service_name"]))
-                # Recompute government amount if changed
                 gov2 = services[services["service_name"] == ns]["govt_amount"].iloc[0]
                 gov2 = None if pd.isna(gov2) else float(gov2)
                 st.caption(f"Govt Amount for '{ns}': {gov2 if gov2 is not None else 'MANUAL'}")
@@ -557,12 +586,10 @@ elif menu == "Suppliers & Ledger":
             try:
                 if action == "Update":
                     if nname != pick:
-                        # rename with conflict check
                         c.execute("SELECT 1 FROM suppliers WHERE supplier_name=?", (nname,))
                         if c.fetchone():
                             st.error("Another supplier with this name already exists.")
                         else:
-                            # Update ledger references
                             c.execute("UPDATE ledger SET supplier_name=? WHERE supplier_name=?", (nname, pick))
                             c.execute("UPDATE suppliers SET supplier_name=?, contact=?, type=? WHERE supplier_name=?",
                                       (nname, ncontact, ntype, pick))
@@ -575,7 +602,6 @@ elif menu == "Suppliers & Ledger":
                         st.success("Updated.")
                         safe_rerun()
                 else:
-                    # Deleting supplier does not delete ledger history
                     c.execute("DELETE FROM suppliers WHERE supplier_name=?", (pick,))
                     conn.commit()
                     st.success("Deleted.")
@@ -591,7 +617,7 @@ elif menu == "Suppliers & Ledger":
         sel_sup = st.selectbox("Supplier", all_sups)
         with st.form("led_add"):
             amt = st.number_input("Amount", min_value=0.0, step=1.0)
-            ttype = st.selectbox("Type", ["D","C"])  # D=debit (you pay), C=credit (they paid you)
+            ttype = st.selectbox("Type", ["D","C"])
             note = st.text_input("Note")
             dte = st.date_input("Date", value=date.today())
             addl = st.form_submit_button("Add Entry")
@@ -785,14 +811,12 @@ elif menu == "Settings":
         if os.path.exists(DB_PATH):
             st.download_button("Download Current Database (.db)", get_db_bytes(), file_name=os.path.basename(DB_PATH))
     with col2:
-        # On-demand ZIP (DB + CSV backups if any)
         if st.button("Create & Download ZIP Backup"):
             try:
                 mem = io.BytesIO()
                 with zipfile.ZipFile(mem, mode="w", compression=zipfile.ZIP_DEFLATED) as z:
                     if os.path.exists(DB_PATH):
                         z.write(DB_PATH, arcname=os.path.basename(DB_PATH))
-                    # Include any *_backup.csv files if you ever add schema migrations
                     for fname in os.listdir("."):
                         if fname.endswith("_backup.csv"):
                             z.write(fname, arcname=fname)
